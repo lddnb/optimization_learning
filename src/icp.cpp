@@ -12,6 +12,8 @@
 #include <gtsam/nonlinear/Values.h>
 #include <gtsam/nonlinear/GaussNewtonOptimizer.h>
 
+#include <optimization_learning/so3_tool.hpp>
+
 class CeresCostFunctor 
 {
   public:
@@ -90,8 +92,8 @@ int main(int argc, char **argv){
     }
 
     // initial guess
-    Eigen::Quaterniond R_init = Eigen::Quaterniond(Eigen::AngleAxisd(1.2, Eigen::Vector3d::UnitX()));
-    Eigen::Vector3d t_init = Eigen::Vector3d(2, 3, 4);
+    const Eigen::Quaterniond R_init = Eigen::Quaterniond(Eigen::AngleAxisd(1.2, Eigen::Vector3d::UnitX()));
+    const Eigen::Vector3d t_init = Eigen::Vector3d(2, 3, 4);
 
     // 一、ceres 优化求解方法
     double T[7] = {R_init.x(), R_init.y(), R_init.z(), R_init.w(), t_init.x(), t_init.y(), t_init.z()};
@@ -187,6 +189,39 @@ int main(int argc, char **argv){
 
     LOG(INFO) << "R: " << Eigen::Quaterniond(T_result.rotation().matrix()).coeffs().transpose();
     LOG(INFO) << "t: " << T_result.translation().transpose();
+
+    // 四、 高斯牛顿法求解
+		LOG(INFO) << "----------- Gauss-Newton -----------";
+    // 对于残差项 e = Rp + t - q，使用右扰动求导时可以得到 de/dR = -Rp^, de/dt = I
+    // 雅克比矩阵为 J = [de/dR, de/dt]，则 H = J^T * J, B = -J^T * e, delta = H^-1 * B
+    Eigen::Matrix<double, 6, 1> delta;
+    delta << 1e5, 1e5, 1e5, 1e5, 1e5, 1e5;
+    Eigen::Matrix3d R_iter = R_init.toRotationMatrix();
+    Eigen::Vector3d t_iter = t_init;
+    int iter = 0;
+
+    while (delta.norm() > 1e-5 && iter < 10) {
+      //! 矩阵需初始化
+      Eigen::Matrix<double, 6, 6> H = Eigen::Matrix<double, 6, 6>::Zero(); // 
+      Eigen::Matrix<double, 6, 1> B = Eigen::Matrix<double, 6, 1>::Zero(); // 
+      for (int i = 0; i < num_points; i++) {
+        Eigen::Matrix<double, 3, 6> J = Eigen::Matrix<double, 3, 6>::Zero();
+        J.leftCols(3) = -R_iter * Hat(source_points[i]);
+        J.rightCols(3) = Eigen::Matrix<double, 3, 3>::Identity();
+        H += J.transpose() * J;
+        B += - J.transpose() * (R_iter * source_points[i] + t_iter - target_points[i]);
+      }
+      if (H.determinant() < 1e-5) {
+        LOG(INFO) << "H is singular, cannot compute delta.";
+        continue;
+      }
+      delta = H.inverse() * B;
+      R_iter *= Exp<double>(delta.head<3>());
+      t_iter += delta.tail<3>();
+      LOG(INFO) << "[" << iter++ << "] delta: " << delta.transpose() << ", t: " << t_iter.transpose();
+    }
+    LOG(INFO) << "R: " << Eigen::Quaterniond(R_iter).coeffs().transpose();
+    LOG(INFO) << "t: " << t_iter.transpose();
 
     return 0;
 }
