@@ -1,3 +1,11 @@
+/**
+ * @ Author: lddnb
+ * @ Create Time: 2024-12-09 11:56:59
+ * @ Modified by: lddnb
+ * @ Modified time: 2024-12-09 16:41:19
+ * @ Description:
+ */
+
 #include <random>
 #include <glog/logging.h>
 #include <Eigen/Eigen>
@@ -12,72 +20,87 @@
 
 // 四元数对数映射log，而非Log，中间差了一半
 template <typename T>
-Eigen::Matrix<T, 3, 1> log_Quaternion(const Eigen::Quaternion<T> &q){
-    const T u_norm = ceres::sqrt(q.x() * q.x() + q.y() * q.y() + q.z() * q.z());
-    const T theta = ceres::atan2(u_norm, q.w());
-    
-    Eigen::Matrix<T, 3, 1> ret = Eigen::Matrix<T, 3, 1>::Zero();
-    if(ceres::fpclassify(u_norm) != FP_ZERO){
-        ret(0) = theta * q.x() / u_norm;
-        ret(1) = theta * q.y() / u_norm;
-        ret(2) = theta * q.z() / u_norm;
-    }
-    
-    return ret;
+Eigen::Matrix<T, 3, 1> log_Quaternion(const Eigen::Quaternion<T>& q)
+{
+  const T u_norm = ceres::sqrt(q.x() * q.x() + q.y() * q.y() + q.z() * q.z());
+  const T theta = ceres::atan2(u_norm, q.w());
+
+  Eigen::Matrix<T, 3, 1> ret = Eigen::Matrix<T, 3, 1>::Zero();
+  if (ceres::fpclassify(u_norm) != FP_ZERO) {
+    ret(0) = theta * q.x() / u_norm;
+    ret(1) = theta * q.y() / u_norm;
+    ret(2) = theta * q.z() / u_norm;
+  }
+
+  return ret;
 }
 
 // 旋转残差
-class CostFunctor1{
-
+class CostFunctor1
+{
 public:
-    CostFunctor1(const Eigen::Matrix3d &R_): R0(R_.transpose()){}
-    CostFunctor1(const Eigen::Quaterniond &R_): R0(R_.inverse()){}
+  CostFunctor1(const Eigen::Matrix3d& R_) : R0(R_.transpose()) {}
+  CostFunctor1(const Eigen::Quaterniond& R_) : R0(R_.inverse()) {}
 
-    template <typename T>
-    bool operator()(const T* const R_, T* residual_) const {
-        Eigen::Map<const Eigen::Quaternion<T>> R(R_);
-        Eigen::Map<Eigen::Matrix<T, 3, 1>> residual(residual_);
+  template <typename T>
+  bool operator()(const T* const R_, T* residual_) const
+  {
+    Eigen::Map<const Eigen::Quaternion<T>> R(R_);
+    Eigen::Map<Eigen::Matrix<T, 3, 1>> residual(residual_);
 
-        // Eigen::Quaternion<T> q_err = R0.cast<T>().inverse() * R;
-        Eigen::Quaternion<T> q_err = R0.cast<T>() * R;
+    // Eigen::Quaternion<T> q_err = R0.cast<T>().inverse() * R;
+    Eigen::Quaternion<T> q_err = R0.cast<T>() * R;
 
-        residual = log_Quaternion(q_err);
+    residual = log_Quaternion(q_err);
 
-        return true;
-    }
+    return true;
+  }
 
 private:
-    Eigen::Quaterniond R0;
-
+  Eigen::Quaterniond R0;
 };
 
-class CostFunctor2 
+class CostFunctor2
 {
-  public:
-    CostFunctor2(const Eigen::Matrix3d& R): R0(R.transpose()) {}
-    CostFunctor2(const Eigen::Quaterniond& R): R0(R.inverse()) {}
+public:
+  CostFunctor2(const Eigen::Matrix3d& R) : R0(R.transpose()) {}
+  CostFunctor2(const Eigen::Quaterniond& R) : R0(R.inverse()) {}
 
-    template<typename T>
-    bool operator()(const T* const q, T* residual) const {
-      Eigen::Map<const Eigen::Quaternion<T>> q_eigen(q);
-      Eigen::Map<Eigen::Matrix<T, 3, 1>> residual_eigen(residual);
-      
-      Eigen::Quaternion<T> R_delta = R0.cast<T>() * q_eigen;
+  template <typename T>
+  bool operator()(const T* const q, T* residual) const
+  {
+    Eigen::Map<const Eigen::Quaternion<T>> q_eigen(q);
+    Eigen::Map<Eigen::Matrix<T, 3, 1>> residual_eigen(residual);
 
-      auto residual_vec = Eigen::AngleAxis<T>(R_delta);
-      residual_eigen = residual_vec.angle() * residual_vec.axis() * 0.5;
-      return true;
-    }
+    Eigen::Quaternion<T> R_delta = R0.cast<T>() * q_eigen;
 
-  private:
-    Eigen::Quaterniond R0;
+    auto residual_vec = Eigen::AngleAxis<T>(R_delta);
+    residual_eigen = residual_vec.angle() * residual_vec.axis() * 0.5;
+    return true;
+  }
+
+private:
+  Eigen::Quaterniond R0;
+};
+
+// ceres 手动求导
+class MyCostFunction : public ceres::SizedCostFunction<3, 4>
+{
+public:
+  MyCostFunction(const Eigen::Quaterniond& R0) : R0(R0.inverse()) {}
+
+private:
+  Eigen::Quaterniond R0;
 };
 
 class GtsamFactor : public gtsam::NoiseModelFactor1<gtsam::Rot3>
 {
 public:
-  GtsamFactor(gtsam::Key key, const Eigen::Quaterniond& R, const gtsam::SharedNoiseModel& model) :
-    gtsam::NoiseModelFactor1<gtsam::Rot3>(model, key), R0(R.inverse()) {}
+  GtsamFactor(gtsam::Key key, const Eigen::Quaterniond& R, const gtsam::SharedNoiseModel& model)
+  : gtsam::NoiseModelFactor1<gtsam::Rot3>(model, key),
+    R0(R.inverse())
+  {
+  }
 
   virtual gtsam::Vector evaluateError(const gtsam::Rot3& R, boost::optional<gtsam::Matrix&> H = boost::none) const override
   {
@@ -91,7 +114,6 @@ public:
 
 private:
   gtsam::Rot3 R0;
-
 };
 
 int main(int argc, char** argv)
@@ -101,8 +123,8 @@ int main(int argc, char** argv)
   google::InitGoogleLogging(argv[0]);
   google::InstallFailureSignalHandler();
 
-  const int num_points = 10; // 生成10个点
-  const double min_value = 1.0; // 最小值
+  const int num_points = 10;     // 生成10个点
+  const double min_value = 1.0;  // 最小值
   const double max_value = 2.0;  // 最大值
 
   // 创建随机数生成器
@@ -113,13 +135,13 @@ int main(int argc, char** argv)
   // 生成随机点
   std::vector<Eigen::Quaterniond> R;
   for (int i = 0; i < num_points; ++i) {
-      double x = distribution(generator); // x
-      double y = distribution(generator); // y
-      double z = distribution(generator); // z
-      Eigen::Vector3d axis(x, y, z);
-      axis.normalize();
-      R.emplace_back(Eigen::AngleAxisd(distribution(generator) * M_PI_4, axis));
-      R.back().normalize();
+    double x = distribution(generator);  // x
+    double y = distribution(generator);  // y
+    double z = distribution(generator);  // z
+    Eigen::Vector3d axis(x, y, z);
+    axis.normalize();
+    R.emplace_back(Eigen::AngleAxisd(distribution(generator) * M_PI_4, axis));
+    R.back().normalize();
   }
 
   // 一、Ceres 第一种残差计算方式
@@ -129,7 +151,7 @@ int main(int argc, char** argv)
   Eigen::Quaterniond R_init = R[0];
 
   ceres::Problem problem_1;
-  ceres::Manifold *quaternion_manifold_1 = new ceres::EigenQuaternionManifold();
+  ceres::Manifold* quaternion_manifold_1 = new ceres::EigenQuaternionManifold();
 
   for (auto& r : R) {
     ceres::CostFunction* cost_function = new ceres::AutoDiffCostFunction<CostFunctor1, 3, 4>(new CostFunctor1(r));
@@ -151,7 +173,7 @@ int main(int argc, char** argv)
   LOG(INFO) << "----------- Ceres test 2 -----------";
   R_res = R[0];
   ceres::Problem problem_2;
-  ceres::Manifold *quaternion_manifold_2 = new ceres::EigenQuaternionManifold();
+  ceres::Manifold* quaternion_manifold_2 = new ceres::EigenQuaternionManifold();
 
   for (auto& r : R) {
     ceres::CostFunction* cost_function = new ceres::AutoDiffCostFunction<CostFunctor2, 3, 4>(new CostFunctor2(r));
@@ -180,14 +202,15 @@ int main(int argc, char** argv)
   gtsam::Rot3 R_init_gtsam = gtsam::Rot3(R_init);
   initial_estimate.insert(key, R_init_gtsam);
   gtsam::GaussNewtonParams params_gn;
-	params_gn.maxIterations = 100;
-	params_gn.relativeErrorTol = 1e-5;
+  params_gn.maxIterations = 100;
+  params_gn.relativeErrorTol = 1e-5;
   gtsam::GaussNewtonOptimizer optimizer(graph, initial_estimate);
   optimizer.optimize();
   gtsam::Values result = optimizer.values();
   gtsam::Rot3 T_result = result.at<gtsam::Rot3>(key);
 
-  LOG(INFO) << "R : " << R_init.coeffs().transpose() << " -> " << Eigen::Quaterniond(T_result.matrix()).coeffs().transpose();
+  LOG(INFO) << "R : " << R_init.coeffs().transpose() << " -> "
+            << Eigen::Quaterniond(T_result.matrix()).coeffs().transpose();
 
   // 四、GTSAM 自带的先验因子优化
   LOG(INFO) << "----------- GTSAM prior test -----------";
@@ -200,20 +223,21 @@ int main(int argc, char** argv)
   gtsam::Values result_prior = optimizer_prior.values();
   gtsam::Rot3 T_result_prior = result_prior.at<gtsam::Rot3>(key);
 
-  LOG(INFO) << "R : " << R_init.coeffs().transpose() << " -> " << Eigen::Quaterniond(T_result_prior.matrix()).coeffs().transpose();
+  LOG(INFO) << "R : " << R_init.coeffs().transpose() << " -> "
+            << Eigen::Quaterniond(T_result_prior.matrix()).coeffs().transpose();
 
   // 五、Eigen 和 GTSAM 中旋转的各种表示
   LOG(INFO) << "----------- Eigen and GTSAM Rotation -----------";
   // 注意旋转的归一化，保证创建的矩阵是旋转矩阵，或者四元数是单位四元数
   // 要么构建前对旋转向量归一化 Eigen::Vector3d().normalize，要么对构建后的旋转量归一化 Eigen::Quaterniond().normalize()
-  Eigen::Quaterniond tmp_R = Eigen::Quaterniond(Eigen::AngleAxisd(M_PI_4, Eigen::Vector3d(1, 2, 3))); //.normalized()
+  Eigen::Quaterniond tmp_R = Eigen::Quaterniond(Eigen::AngleAxisd(M_PI_4, Eigen::Vector3d(1, 2, 3)));  //.normalized()
   tmp_R.normalize();
   LOG(INFO) << "!!! Eigen !!!";
   LOG(INFO) << "R: " << tmp_R.toRotationMatrix();
   LOG(INFO) << "q(xyzw): " << tmp_R.coeffs().transpose();
   auto vec = Eigen::AngleAxisd(tmp_R);
-  LOG(INFO) << "AngleAxisd: " << vec.angle()*vec.axis().transpose();
-  LOG(INFO) << "angle: " << vec.angle() / M_PI*180;
+  LOG(INFO) << "AngleAxisd: " << vec.angle() * vec.axis().transpose();
+  LOG(INFO) << "angle: " << vec.angle() / M_PI * 180;
   LOG(INFO) << "axis: " << vec.axis().transpose();
 
   LOG(INFO) << "!!! log_Quaternion !!!";
@@ -223,8 +247,8 @@ int main(int argc, char** argv)
   auto R_gtsam = gtsam::Rot3(tmp_R);
   LOG(INFO) << "R: " << R_gtsam.matrix();
   LOG(INFO) << "q(wxyz): " << R_gtsam.quaternion().transpose();
-  LOG(INFO) << "angle: " << R_gtsam.axisAngle().second / M_PI*180;
-  
+  LOG(INFO) << "angle: " << R_gtsam.axisAngle().second / M_PI * 180;
+
   gtsam::Vector axis_gtsam(R_gtsam.axisAngle().first.point3());
   LOG(INFO) << "axis: " << axis_gtsam.transpose();
   LOG(INFO) << "AngleAxisd: " << (axis_gtsam * R_gtsam.axisAngle().second).transpose();
