@@ -4,6 +4,10 @@ project(optimization_learning)
 ## Compile as C++11, supported in ROS Kinetic and newer
 add_compile_options(-std=c++17)
 
+if(NOT DEFINED CMAKE_SUPPRESS_DEVELOPER_WARNINGS)
+     set(CMAKE_SUPPRESS_DEVELOPER_WARNINGS 1 CACHE INTERNAL "No dev warnings")
+endif()
+
 ## Find catkin macros and libraries
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
 ## is used, also find other catkin packages
@@ -13,14 +17,16 @@ find_package(catkin REQUIRED COMPONENTS
   std_msgs
 )
 
-## System dependencies are found with CMake's conventions
+## System dependencies are found with CMake's conventions  PATHS /home/lz/3party/ceres-solver/install/lib/cmake/Ceres/
 # find_package(Boost REQUIRED COMPONENTS system)
+set(Ceres_DIR "/home/lz/3party/ceres-solver/install/lib/cmake/Ceres/")
+set(glog_DIR "/home/lz/3party/glog/install/lib/cmake/glog")
+
+find_package(glog 0.6.0 REQUIRED)
 find_package(GTSAMCMakeTools)
 find_package(GTSAM REQUIRED QUIET)
 find_package(PCL 1.10 REQUIRED)
-find_package(Ceres REQUIRED)
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(glog REQUIRED libglog)
+find_package(Ceres 2.2.0 REQUIRED)
 
 ## Uncomment this if the package has a setup.py. This macro ensures
 ## modules and global scripts declared therein get installed
@@ -125,8 +131,6 @@ include_directories(
   ${catkin_INCLUDE_DIRS}
   ${GTSAM_INCLUDE_DIR}
   ${PCL_INCLUDE_DIRS}
-  ${CERES_INCLUDE_DIRS}
-  ${glog_INCLUDE_DIRS}
 )
 
 ## Declare a C++ library
@@ -159,12 +163,18 @@ include_directories(
 #   ${catkin_LIBRARIES}
 # )
 
+message("Eigen version: ${EIGEN3_VERSION_STRING}")
+message("GTSAM version: ${GTSAM_VERSION}")
+message("Ceres version: ${Ceres_VERSION}")
+message("PCL version: ${PCL_VERSION}")
+message("Glog version: ${glog_VERSION}")
+
 add_executable(R_mean src/R_mean.cpp)
 target_link_libraries(R_mean
   ${catkin_LIBRARIES} 
   ${PCL_LIBRARIES}
-  ${CERES_LIBRARIES}
-  ${glog_LIBRARIES}
+  Ceres::ceres
+  glog::glog
   gtsam
 )
 
@@ -172,8 +182,8 @@ add_executable(icp src/icp.cpp)
 target_link_libraries(icp
   ${catkin_LIBRARIES} 
   ${PCL_LIBRARIES}
-  ${CERES_LIBRARIES}
-  ${glog_LIBRARIES}
+  Ceres::ceres
+  glog::glog
   gtsam
 )
 
