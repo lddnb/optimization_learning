@@ -2,7 +2,7 @@
  * @ Author: lddnb
  * @ Create Time: 2024-12-09 11:56:59
  * @ Modified by: lddnb
- * @ Modified time: 2024-12-13 14:17:20
+ * @ Modified time: 2024-12-13 15:02:55
  * @ Description:
  */
 
@@ -69,7 +69,7 @@ int main(int argc, char** argv)
   LOG(INFO) << "----------- Eigen::AngleAxis test -----------";
   R_res = R[0];
   ceres::Problem problem_2;
-  ceres::Manifold* quaternion_manifold_2 = new RightQuaternionManifold; // ceres::EigenQuaternionManifold();
+  ceres::Manifold* quaternion_manifold_2 = new RightQuaternionManifold(); // ceres::EigenQuaternionManifold();
 
   for (auto& r : R) {
     ceres::CostFunction* cost_function = new ceres::AutoDiffCostFunction<CostFunctor2, 3, 4>(new CostFunctor2(r));
@@ -89,7 +89,7 @@ int main(int argc, char** argv)
   
   R_res = R[0];
   ceres::Problem problem_3;
-  ceres::Manifold* quaternion_manifold_3 = new ceres::EigenQuaternionManifold(); // ceres::EigenQuaternionManifold();
+  ceres::Manifold* quaternion_manifold_3 = new RightQuaternionManifold(); // ceres::EigenQuaternionManifold();
 
   for (auto& r : R) {
     ceres::CostFunction* cost_function = new MyCostFunction(r);

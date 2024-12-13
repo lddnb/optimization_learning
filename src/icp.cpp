@@ -2,7 +2,7 @@
  * @ Author: lddnb
  * @ Create Time: 2024-12-09 11:56:59
  * @ Modified by: lddnb
- * @ Modified time: 2024-12-09 16:43:34
+ * @ Modified time: 2024-12-13 15:30:41
  * @ Description:
  */
 
@@ -11,72 +11,8 @@
 #include <numeric>
 
 #include <glog/logging.h>
-#include <Eigen/Eigen>
-#include <ceres/ceres.h>
-#include <gtsam/geometry/Rot3.h>
-#include <gtsam/geometry/Pose3.h>
-#include <gtsam/inference/Symbol.h>
-#include <gtsam/nonlinear/NonlinearFactorGraph.h>
-#include <gtsam/nonlinear/Values.h>
-#include <gtsam/nonlinear/GaussNewtonOptimizer.h>
 
-#include <optimization_learning/so3_tool.hpp>
-
-class CeresCostFunctor
-{
-public:
-  CeresCostFunctor(const Eigen::Vector3d& curr_point, const Eigen::Vector3d& target_point)
-  : curr_point_(curr_point),
-    target_point_(target_point)
-  {
-  }
-
-  template <typename T>
-  bool operator()(const T* const se3, T* residual) const
-  {
-    Eigen::Map<const Eigen::Quaternion<T>> R(se3);
-    Eigen::Map<const Eigen::Matrix<T, 3, 1>> t(se3 + 4);
-    Eigen::Map<Eigen::Matrix<T, 3, 1>> residual_eigen(residual);
-
-    residual_eigen = R * curr_point_.cast<T>() + t - target_point_.cast<T>();
-    return true;
-  }
-
-private:
-  Eigen::Vector3d curr_point_;
-  Eigen::Vector3d target_point_;
-};
-
-class GtsamIcpFactor : public gtsam::NoiseModelFactor1<gtsam::Pose3>
-{
-public:
-  GtsamIcpFactor(
-    gtsam::Key key,
-    const gtsam::Point3& source_point,
-    const gtsam::Point3& target_point,
-    const gtsam::SharedNoiseModel& cost_model)
-  : gtsam::NoiseModelFactor1<gtsam::Pose3>(cost_model, key),
-    source_point_(source_point),
-    target_point_(target_point)
-  {
-  }
-
-  virtual gtsam::Vector evaluateError(const gtsam::Pose3& T, boost::optional<gtsam::Matrix&> H = boost::none) const override
-  {
-    gtsam::Matrix A = gtsam::Matrix::Zero(3, 6);
-
-    gtsam::Point3 p_trans = T.transformFrom(source_point_, A);
-    gtsam::Vector error = p_trans - target_point_;
-    if (H) {
-      *H = A;
-    }
-    return error;
-  }
-
-private:
-  gtsam::Point3 source_point_;
-  gtsam::Point3 target_point_;
-};
+#include "optimization_learning/icp.hpp"
 
 int main(int argc, char** argv)
 {
@@ -139,7 +75,7 @@ int main(int argc, char** argv)
   ceres::Solver::Summary summary;
   ceres::Solve(options, &problem, &summary);
 
-  LOG(INFO) << summary.FullReport();
+  // LOG(INFO) << summary.FullReport();
 
   // 这里的 Eigen::Map 相当于是用的 Eigen::Quaterniond q(Eigen::Vector4d(x, y, z, w)) 的形式初始化
   // 这才是在几个数据在内存中的布局，而不是 Eigen::Quaterniond q(w, x, y, z) 的形式
@@ -154,9 +90,30 @@ int main(int argc, char** argv)
   LOG(INFO) << "t_init: " << t_init.transpose();
   LOG(INFO) << "R_Ture: " << R_ture.coeffs().transpose();
   LOG(INFO) << "t_ture: " << t_ture.transpose();
-  LOG(INFO) << "----------- Ceres -----------";
+  LOG(INFO) << "----------- Ceres 1 -----------";
   LOG(INFO) << "R: " << R.coeffs().transpose();
   LOG(INFO) << "t: " << t.transpose();
+
+  double T_R[4] = {R_init.x(), R_init.y(), R_init.z(), R_init.w()};
+  double T_t[3] = {t_init.x(), t_init.y(), t_init.z()};
+  ceres::Manifold* so3 = new RightQuaternionManifold(); // ceres::EigenQuaternionManifold
+  ceres::Problem problem_2;
+  problem_2.AddParameterBlock(T_R, 4, so3);
+  problem_2.AddParameterBlock(T_t, 3);
+  for (int i = 0; i < num_points; i++) {
+    ceres::CostFunction* cost_function =
+      new MyCossFunction(source_points[i], target_points[i]);
+    problem_2.AddResidualBlock(cost_function, nullptr, T_R, T_t);
+  }
+  ceres::Solver::Summary summary_2;
+  ceres::Solve(options, &problem_2, &summary_2);
+
+  Eigen::Map<Eigen::Quaterniond> R2(T);
+  Eigen::Map<Eigen::Vector3d> t2(T + 4);
+
+  LOG(INFO) << "----------- Ceres 2 -----------";
+  LOG(INFO) << "R: " << R2.coeffs().transpose();
+  LOG(INFO) << "t: " << t2.transpose();
 
   // 二、 SVD 分解求法
   LOG(INFO) << "----------- SVD -----------";
@@ -238,7 +195,7 @@ int main(int argc, char** argv)
       continue;
     }
     delta = H.inverse() * B;
-    R_iter *= Exp<double>(delta.head<3>());
+    R_iter *= Exp(delta.head<3>());
     t_iter += delta.tail<3>();
     LOG(INFO) << "[" << iter++ << "] delta: " << delta.transpose() << ", t: " << t_iter.transpose();
   }

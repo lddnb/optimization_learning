@@ -2,7 +2,7 @@
  * @ Author: lddnb
  * @ Create Time: 2024-12-09 14:34:33
  * @ Modified by: lddnb
- * @ Modified time: 2024-12-11 18:37:50
+ * @ Modified time: 2024-12-13 16:05:47
  * @ Description:
  */
 
@@ -76,9 +76,7 @@ Eigen::Matrix<typename Derived::Scalar, 4, 4> QRight(const Eigen::QuaternionBase
 // 右扰动模型的四元数
 class RightQuaternionManifold : public ceres::Manifold
 {
-  bool Plus(const double* x,
-            const double* delta,
-            double* x_plus_delta) const override
+  bool Plus(const double* x, const double* delta, double* x_plus_delta) const override
   {
     // 流型加法，x boxplus delta = x * Exp(delta)
     Eigen::Map<const Eigen::Quaterniond> q(x);
@@ -92,10 +90,13 @@ class RightQuaternionManifold : public ceres::Manifold
       q_plus_d = q;
       return true;
     }
-  
+
     const double sin_delta_by_delta = (std::sin(norm_delta) / norm_delta);
     Eigen::Quaterniond dq(
-      std::cos(norm_delta), sin_delta_by_delta * delta[0], sin_delta_by_delta * delta[1], sin_delta_by_delta * delta[2]);
+      std::cos(norm_delta),
+      sin_delta_by_delta * delta[0],
+      sin_delta_by_delta * delta[1],
+      sin_delta_by_delta * delta[2]);
 
     q_plus_d = (q * dq).normalized();
 
@@ -125,9 +126,7 @@ class RightQuaternionManifold : public ceres::Manifold
 
     return true;
   }
-  bool Minus(const double* y,
-             const double* x,
-             double* y_minus_x) const override
+  bool Minus(const double* y, const double* x, double* y_minus_x) const override
   {
     // 流型减法，y boxminus x = Log(x^{-1} * y)
     Eigen::Map<const Eigen::Quaterniond> q_y(y);

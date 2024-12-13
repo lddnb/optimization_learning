@@ -2,7 +2,7 @@
  * @ Author: lddnb
  * @ Create Time: 2024-12-13 11:52:30
  * @ Modified by: lddnb
- * @ Modified time: 2024-12-13 11:53:35
+ * @ Modified time: 2024-12-13 15:58:52
  * @ Description:
  */
 
@@ -72,7 +72,7 @@ private:
 };
 
 // ceres 手动求导
-// Todo: 这个求导方式有问题，待修复
+// Todo: 这个求导方式有问题，待修复，详见 Issue #1
 class MyCostFunction : public ceres::SizedCostFunction<3, 4>
 {
 public:
@@ -91,8 +91,7 @@ public:
 
     // 残差定义 2
     // 参考的 https://fzheng.me/2018/05/22/quaternion-matrix-so3-jacobians/
-    // residual_eigen << R_delta.x(), R_delta.y(), R_delta.z();
-    // residual_eigen *= 2.0;
+    // residual_eigen = 2.0 * R_delta.vec();
 
     if (jacobians == nullptr) {
       return true;
@@ -109,6 +108,7 @@ public:
       // jacobian_R  << R_delta.w(), R_delta.z(), -R_delta.y(), -R_delta.x(),
       //    -R_delta.z(), R_delta.w(), R_delta.x(), -R_delta.y(),
       //    R_delta.y(), -R_delta.x(), R_delta.w(), -R_delta.z();
+      // jacobian_R.leftCols(3) << R_delta.w() * Eigen::Matrix3d::Identity() + Hat(R_delta.vec());
     }
     return true;
   }
