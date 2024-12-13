@@ -2,7 +2,7 @@
  * @ Author: lddnb
  * @ Create Time: 2024-12-09 11:56:59
  * @ Modified by: lddnb
- * @ Modified time: 2024-12-13 15:30:41
+ * @ Modified time: 2024-12-13 18:13:18
  * @ Description:
  */
 
@@ -108,8 +108,8 @@ int main(int argc, char** argv)
   ceres::Solver::Summary summary_2;
   ceres::Solve(options, &problem_2, &summary_2);
 
-  Eigen::Map<Eigen::Quaterniond> R2(T);
-  Eigen::Map<Eigen::Vector3d> t2(T + 4);
+  Eigen::Map<Eigen::Quaterniond> R2(T_R);
+  Eigen::Map<Eigen::Vector3d> t2(T_t);
 
   LOG(INFO) << "----------- Ceres 2 -----------";
   LOG(INFO) << "R: " << R2.coeffs().transpose();

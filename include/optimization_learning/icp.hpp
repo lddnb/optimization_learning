@@ -2,7 +2,7 @@
  * @ Author: lddnb
  * @ Create Time: 2024-12-13 14:47:47
  * @ Modified by: lddnb
- * @ Modified time: 2024-12-13 15:31:13
+ * @ Modified time: 2024-12-13 18:34:29
  * @ Description:
  */
 
@@ -109,7 +109,13 @@ public:
     gtsam::Point3 p_trans = T.transformFrom(source_point_, A);
     gtsam::Vector error = p_trans - target_point_;
     if (H) {
-      *H = A;
+      // *H = A;
+
+      // 这里对平移的导数不是单位阵，是因为这里是以 SE3 为变量，对 SE3 做右扰动求导的结果
+      gtsam::Matrix J = gtsam::Matrix::Zero(3, 6);
+      J.leftCols(3) = -T.rotation().matrix() * gtsam::SO3::Hat(source_point_);
+      J.rightCols(3) = T.rotation().matrix();
+      *H = J;
     }
     return error;
   }

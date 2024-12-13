@@ -2,7 +2,7 @@
  * @ Author: lddnb
  * @ Create Time: 2024-12-13 11:52:30
  * @ Modified by: lddnb
- * @ Modified time: 2024-12-13 15:58:52
+ * @ Modified time: 2024-12-13 16:38:11
  * @ Description:
  */
 
@@ -130,7 +130,7 @@ public:
     const override
   {
     gtsam::Rot3 R_delta = R0 * R;
-    gtsam::Vector residual = gtsam::Rot3::Logmap(R_delta) * 0.5;
+    gtsam::Vector residual = gtsam::Rot3::Logmap(R_delta);
     if (H) {
       *H = gtsam::I_3x3;
     }
