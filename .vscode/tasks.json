@@ -1,0 +1,37 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+      {
+          "label": "Colcon Build",
+          "type": "shell",
+          "command": "source",
+          "args": [
+              "~/.zshrc", "&&", "colcon", "build",
+              "--symlink-install",
+              "--cmake-args", "-DCMAKE_EXPORT_COMPILE_COMMANDS=1",
+          ],
+          "group": {
+              "kind": "build",
+              "isDefault": true
+          },
+          "problemMatcher": [],
+          "detail": "Colcon build task for ROS 2 workspace"
+      },
+      {
+        "label": "Gtest",
+        "type": "shell",
+        "command": "source",
+        "args": [
+            "~/.zshrc", "&&", "colcon", "test",
+            "--packages-select", "optimization_learning",
+            "--event-handlers", "console_direct+",
+        ],
+        "group": {
+            "kind": "test",
+            "isDefault": true
+        },
+        "problemMatcher": [],
+        "detail": "Gtest task for ROS 2 workspace"
+      }
+  ]
+}

@@ -2,15 +2,16 @@
 
 Dependencies
 - ROS2 jazzy
-- Eigen 3.3.9
-- PCL 1.14
+- Eigen 3.4.0
+- PCL 1.14.0
 - Ceres 2.2.0
-- GTSAM 4.0.3
+- GTSAM 4.2.0
+- OpenCV 4.6.0
 
 
 
 Todo list
-- [ ]  create dev container
-- [ ]  Migrate to ROS2 jazzy
+- [x]  create dev container
+- [x]  Migrate to ROS2 jazzy
 - [ ]  Add point-to-plane ICP
 - [ ]  Add GICP

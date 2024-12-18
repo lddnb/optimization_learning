@@ -115,9 +115,10 @@ int main(int argc, char** argv)
   gtsam::Rot3 R_init_gtsam = gtsam::Rot3(R_init);
   initial_estimate.insert(key, R_init_gtsam);
   gtsam::GaussNewtonParams params_gn;
+  params_gn.setVerbosity("ERROR");
   params_gn.maxIterations = 100;
   params_gn.relativeErrorTol = 1e-5;
-  gtsam::GaussNewtonOptimizer optimizer(graph, initial_estimate);
+  gtsam::GaussNewtonOptimizer optimizer(graph, initial_estimate, params_gn);
   optimizer.optimize();
   gtsam::Values result = optimizer.values();
   gtsam::Rot3 T_result = result.at<gtsam::Rot3>(key);
@@ -131,7 +132,7 @@ int main(int argc, char** argv)
   for (auto& r : R) {
     graph_prior.add(gtsam::PriorFactor<gtsam::Rot3>(key, gtsam::Rot3(r), gtsam::noiseModel::Isotropic::Sigma(3, 1)));
   }
-  gtsam::GaussNewtonOptimizer optimizer_prior(graph_prior, initial_estimate);
+  gtsam::GaussNewtonOptimizer optimizer_prior(graph_prior, initial_estimate, params_gn);
   optimizer_prior.optimize();
   gtsam::Values result_prior = optimizer_prior.values();
   gtsam::Rot3 T_result_prior = result_prior.at<gtsam::Rot3>(key);
@@ -160,7 +161,7 @@ int main(int argc, char** argv)
   LOG(INFO) << "!!! GTSAM !!!";
   auto R_gtsam = gtsam::Rot3(tmp_R);
   LOG(INFO) << "R: " << std::endl << R_gtsam.matrix();
-  LOG(INFO) << "q(wxyz): " << R_gtsam.quaternion().transpose();
+  LOG(INFO) << "q(wxyz): " << R_gtsam.toQuaternion();
   LOG(INFO) << "angle: " << R_gtsam.axisAngle().second / M_PI * 180;
 
   gtsam::Vector axis_gtsam(R_gtsam.axisAngle().first.point3());

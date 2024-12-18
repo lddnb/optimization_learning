@@ -88,6 +88,7 @@ private:
   Eigen::Vector3d target_point_;
 };
 
+// SE3
 class GtsamIcpFactor : public gtsam::NoiseModelFactor1<gtsam::Pose3>
 {
 public:
@@ -109,13 +110,50 @@ public:
     gtsam::Point3 p_trans = T.transformFrom(source_point_, A);
     gtsam::Vector error = p_trans - target_point_;
     if (H) {
-      // *H = A;
+      *H = A;
 
-      // 这里对平移的导数不是单位阵，是因为这里是以 SE3 为变量，对 SE3 做右扰动求导的结果
-      gtsam::Matrix J = gtsam::Matrix::Zero(3, 6);
-      J.leftCols(3) = -T.rotation().matrix() * gtsam::SO3::Hat(source_point_);
-      J.rightCols(3) = T.rotation().matrix();
-      *H = J;
+      // gtsam::Matrix J = gtsam::Matrix::Zero(3, 6);
+      // J.leftCols(3) = -T.rotation().matrix() * gtsam::SO3::Hat(source_point_);
+      // J.rightCols(3) = T.rotation().matrix();
+      // *H = J;
+    }
+    return error;
+  }
+
+private:
+  gtsam::Point3 source_point_;
+  gtsam::Point3 target_point_;
+};
+
+// SO3 + R3
+class GtsamIcpFactor2 : public gtsam::NoiseModelFactor2<gtsam::Rot3, gtsam::Point3>
+{
+public:
+  GtsamIcpFactor2(
+    gtsam::Key key1,
+    gtsam::Key key2,
+    const gtsam::Point3& source_point,
+    const gtsam::Point3& target_point,
+    const gtsam::SharedNoiseModel& cost_model)
+  : gtsam::NoiseModelFactor2<gtsam::Rot3, gtsam::Point3>(cost_model, key1, key2),
+    source_point_(source_point),
+    target_point_(target_point)
+  {
+  }
+
+  virtual gtsam::Vector evaluateError(
+    const gtsam::Rot3& R,
+    const gtsam::Point3& t,
+    boost::optional<gtsam::Matrix&> H1 = boost::none,
+    boost::optional<gtsam::Matrix&> H2 = boost::none) const override
+  {
+    gtsam::Point3 p_trans = R * source_point_ + t;
+    gtsam::Vector error = p_trans - target_point_;
+    if (H1) {
+      *H1 = -R.matrix() * gtsam::SO3::Hat(source_point_);
+    }
+    if (H2) {
+      *H2 = gtsam::I_3x3;
     }
     return error;
   }
