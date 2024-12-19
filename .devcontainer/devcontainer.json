@@ -45,7 +45,9 @@
   },
   "mounts": [
     "source=/tmp/.X11-unix,target=/tmp/.X11-unix,type=bind,consistency=cached",
-    "source=/dev,target=/dev,type=bind,consistency=cached"
+    "source=/dev,target=/dev,type=bind,consistency=cached",
+    "source=${localEnv:HOME}/.gitconfig,target=/home/ubuntu/.gitconfig,type=bind,consistency=cached",
+    "source=${localEnv:HOME}/.ssh,target=/home/ubuntu/.ssh,type=bind,consistency=cached"
   ],
   "workspaceMount": "source=${localWorkspaceFolder},target=/home/ubuntu/ros_ws/src/${localWorkspaceFolderBasename},type=bind",
   "workspaceFolder": "/home/ubuntu/ros_ws"

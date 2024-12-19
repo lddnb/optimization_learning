@@ -2,7 +2,7 @@
  * @ Author: lddnb
  * @ Create Time: 2024-12-09 11:56:59
  * @ Modified by: lddnb
- * @ Modified time: 2024-12-13 18:13:18
+ * @ Modified time: 2024-12-19 11:02:16
  * @ Description:
  */
 
@@ -11,6 +11,9 @@
 #include <numeric>
 
 #include <glog/logging.h>
+#include <pcl/io/pcd_io.h>
+#include <pcl/point_types.h>
+#include <pcl/point_cloud.h>
 
 #include "optimization_learning/icp.hpp"
 
@@ -19,8 +22,8 @@ int main(int argc, char** argv)
   std::vector<Eigen::Vector3d> source_points;
   std::vector<Eigen::Vector3d> target_points;
 
-  Eigen::Quaterniond R_ture = Eigen::Quaterniond(Eigen::AngleAxisd(1.5, Eigen::Vector3d::UnitX()));
-  Eigen::Vector3d t_ture = Eigen::Vector3d(1, 2, 3);
+  const Eigen::Quaterniond R_ture = Eigen::Quaterniond(Eigen::AngleAxisd(1.5, Eigen::Vector3d::UnitX()));
+  const Eigen::Vector3d t_ture = Eigen::Vector3d(1, 2, 3);
 
   // Eigen 中四元数乘以向量和转成旋转矩阵后再乘以向量的结果是一样的
   // 可以都看成是旋转向量的运算

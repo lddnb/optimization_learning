@@ -1,3 +1,11 @@
+/**
+ * @ Author: lddnb
+ * @ Create Time: 2024-12-18 17:28:38
+ * @ Modified by: lddnb
+ * @ Modified time: 2024-12-19 10:42:03
+ * @ Description:
+ */
+
 #include <gtest/gtest.h>
 #include <optimization_learning/icp.hpp>
 
@@ -61,13 +69,12 @@ TEST(ICPTest, ceres_SO3_R3)
 {
   double T_R[4] = {R_init.x(), R_init.y(), R_init.z(), R_init.w()};
   double T_t[3] = {t_init.x(), t_init.y(), t_init.z()};
-  ceres::Manifold* so3 = new RightQuaternionManifold(); // ceres::EigenQuaternionManifold
+  ceres::Manifold* so3 = new RightQuaternionManifold();  // ceres::EigenQuaternionManifold
   ceres::Problem problem_2;
   problem_2.AddParameterBlock(T_R, 4, so3);
   problem_2.AddParameterBlock(T_t, 3);
   for (int i = 0; i < num_points; i++) {
-    ceres::CostFunction* cost_function =
-      new MyCossFunction(source_points[i], target_points[i]);
+    ceres::CostFunction* cost_function = new MyCossFunction(source_points[i], target_points[i]);
     problem_2.AddResidualBlock(cost_function, nullptr, T_R, T_t);
   }
   ceres::Solver::Summary summary_2;
@@ -229,8 +236,7 @@ TEST(ICPTest, Gauss_Newton)
   EXPECT_NEAR((t_iter - t_ture).norm(), 0.0, 1e-6);
 }
 
-
-int main(int argc, char **argv)
+int main(int argc, char** argv)
 {
   testing::InitGoogleTest(&argc, argv);
   google::InstallFailureSignalHandler();  // 配置安装程序崩溃失败信号处理器

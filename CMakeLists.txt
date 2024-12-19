@@ -1,7 +1,11 @@
 cmake_minimum_required(VERSION 3.20)
 project(optimization_learning)
 
+SET(CMAKE_BUILD_TYPE "Release")
 add_compile_options(-std=c++17)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3")
 
 # if(NOT DEFINED CMAKE_SUPPRESS_DEVELOPER_WARNINGS)
 #      set(CMAKE_SUPPRESS_DEVELOPER_WARNINGS 1 CACHE INTERNAL "No dev warnings")
@@ -9,7 +13,8 @@ add_compile_options(-std=c++17)
 
 find_package(glog REQUIRED)
 find_package(GTSAM REQUIRED)
-find_package(PCL REQUIRED COMPONENTS common io)
+find_package(PCL REQUIRED COMPONENTS
+  common io search visualization filters features registration)
 find_package(Ceres REQUIRED)
 
 find_package(ament_cmake REQUIRED)
@@ -54,7 +59,18 @@ target_link_libraries(icp
   gtsam
 )
 
-install(TARGETS R_mean icp
+add_executable(pcd_icp src/pcd_icp.cpp)
+ament_target_dependencies(pcd_icp
+  rclcpp
+)
+target_link_libraries(pcd_icp
+  ${PCL_LIBRARIES}
+  Ceres::ceres
+  glog::glog
+  gtsam
+)
+
+install(TARGETS R_mean icp pcd_icp
   DESTINATION lib/${PROJECT_NAME}
 )
 

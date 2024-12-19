@@ -2,7 +2,7 @@
  * @ Author: lddnb
  * @ Create Time: 2024-12-13 14:47:47
  * @ Modified by: lddnb
- * @ Modified time: 2024-12-13 18:34:29
+ * @ Modified time: 2024-12-19 18:25:34
  * @ Description:
  */
 
@@ -16,6 +16,7 @@
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
 #include <gtsam/nonlinear/Values.h>
 #include <gtsam/nonlinear/GaussNewtonOptimizer.h>
+#include <pcl/point_types.h>
 
 #include <optimization_learning/so3_tool.hpp>
 
@@ -25,6 +26,12 @@ public:
   CeresCostFunctor(const Eigen::Vector3d& curr_point, const Eigen::Vector3d& target_point)
   : curr_point_(curr_point),
     target_point_(target_point)
+  {
+  }
+
+  CeresCostFunctor(const pcl::PointXYZI& curr_point, const pcl::PointXYZI& target_point)
+  : curr_point_(curr_point.x, curr_point.y, curr_point.z),
+    target_point_(target_point.x, target_point.y, target_point.z)
   {
   }
 
@@ -103,6 +110,17 @@ public:
   {
   }
 
+  GtsamIcpFactor(
+    gtsam::Key key,
+    const pcl::PointXYZI& source_point,
+    const pcl::PointXYZI& target_point,
+    const gtsam::SharedNoiseModel& cost_model)
+  : gtsam::NoiseModelFactor1<gtsam::Pose3>(cost_model, key),
+    source_point_(source_point.x, source_point.y, source_point.z),
+    target_point_(target_point.x, target_point.y, target_point.z)
+  {
+  }
+
   virtual gtsam::Vector evaluateError(const gtsam::Pose3& T, boost::optional<gtsam::Matrix&> H = boost::none) const override
   {
     gtsam::Matrix A = gtsam::Matrix::Zero(3, 6);
@@ -138,6 +156,18 @@ public:
   : gtsam::NoiseModelFactor2<gtsam::Rot3, gtsam::Point3>(cost_model, key1, key2),
     source_point_(source_point),
     target_point_(target_point)
+  {
+  }
+
+  GtsamIcpFactor2(
+    gtsam::Key key1,
+    gtsam::Key key2,
+    const pcl::PointXYZI& source_point,
+    const pcl::PointXYZI& target_point,
+    const gtsam::SharedNoiseModel& cost_model)
+  : gtsam::NoiseModelFactor2<gtsam::Rot3, gtsam::Point3>(cost_model, key1, key2),
+    source_point_(source_point.x, source_point.y, source_point.z),
+    target_point_(target_point.x, target_point.y, target_point.z)
   {
   }
 
