@@ -1,6 +1,8 @@
 FROM osrf/ros:jazzy-desktop-noble
 
-RUN sed -i s:/archive.ubuntu.com:/mirrors.tuna.tsinghua.edu.cn/ubuntu:g /etc/apt/sources.list
+RUN sed -i 's@//.*archive.ubuntu.com@//mirrors.ustc.edu.cn@g' /etc/apt/sources.list.d/ubuntu.sources
+RUN sed -i 's@//.*security.ubuntu.com@//mirrors.ustc.edu.cn@g' /etc/apt/sources.list.d/ubuntu.sources
+
 RUN cat /etc/apt/sources.list
 RUN apt-get clean
 RUN apt-get -y update --fix-missing
@@ -8,8 +10,8 @@ RUN apt-get -y update --fix-missing
 ENV TZ=Asia/Shanghai \
     DEBIAN_FRONTEND=noninteractive
 
-ENV HTTP_PROXY http://127.0.0.1:7890
-ENV HTTPS_PROXY http://127.0.0.1:7890
+# ENV HTTP_PROXY=http://127.0.0.1:7890
+# ENV HTTPS_PROXY=http://127.0.0.1:7890
 
 # setup timezone
 RUN apt-get update && \
@@ -21,8 +23,8 @@ RUN apt-get update && \
     locale-gen en_US en_US.UTF-8 && \
     update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8
 
-ENV LANG en_US.UTF-8
-ENV LC_ALL en_US.UTF-8
+ENV LANG=en_US.UTF-8
+ENV LC_ALL=en_US.UTF-8
 ENV NVIDIA_VISIBLE_DEVICES=all
 ENV NVIDIA_DRIVER_CAPABILITIES=all
 
