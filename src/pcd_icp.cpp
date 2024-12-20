@@ -2,7 +2,7 @@
  * @ Author: lddnb
  * @ Create Time: 2024-12-19 10:42:55
  * @ Modified by: lddnb
- * @ Modified time: 2024-12-19 18:49:54
+ * @ Modified time: 2024-12-20 10:40:58
  * @ Description:
  */
 
@@ -185,8 +185,10 @@ int main(int argc, char** argv)
   pcl::KdTreeFLANN<pcl::PointXYZI> kdtree = pcl::KdTreeFLANN<pcl::PointXYZI>();
   kdtree.setInputCloud(target_points);
 
+  LOG(INFO) << "======================== Point to Point ICP ========================";
+
   LOG(INFO) << "------------------- Ceres ------------------";
-  double T[7] = {R_init.x(), R_init.y(), R_init.z(), R_init.w(), t_init.x(), t_init.y(), t_init.z()};
+  std::vector<double> T = {R_init.x(), R_init.y(), R_init.z(), R_init.w(), t_init.x(), t_init.y(), t_init.z()};
 
   int iterations = 0;
   Eigen::Quaterniond last_R = R_init;
@@ -199,7 +201,7 @@ int main(int argc, char** argv)
     ceres::ProductManifold<ceres::EigenQuaternionManifold, ceres::EuclideanManifold<3>>* se3 =
       new ceres::ProductManifold<ceres::EigenQuaternionManifold, ceres::EuclideanManifold<3>>;
     ceres::Problem problem;
-    problem.AddParameterBlock(T, 7, se3);
+    problem.AddParameterBlock(T.data(), 7, se3);
 
     for (int i = 0; i < source_points->size(); i++) {
       // 最近邻搜索
@@ -209,7 +211,7 @@ int main(int argc, char** argv)
 
       ceres::CostFunction* cost_function = new ceres::AutoDiffCostFunction<CeresCostFunctor, 3, 7>(
         new CeresCostFunctor(source_points->at(i), target_points->at(nn_indices[0])));
-      problem.AddResidualBlock(cost_function, nullptr, T);
+      problem.AddResidualBlock(cost_function, nullptr, T.data());
     }
 
     ceres::Solver::Options options;
@@ -219,8 +221,8 @@ int main(int argc, char** argv)
     ceres::Solver::Summary summary;
     ceres::Solve(options, &problem, &summary);
 
-    Eigen::Map<Eigen::Quaterniond> R(T);
-    Eigen::Map<Eigen::Vector3d> t(T + 4);
+    Eigen::Map<Eigen::Quaterniond> R(T.data());
+    Eigen::Map<Eigen::Vector3d> t(T.data() + 4);
     if ((R.coeffs() - last_R.coeffs()).norm() < 1e-5 && (t - last_t).norm() < 1e-5) {
       break;
     }
@@ -231,8 +233,8 @@ int main(int argc, char** argv)
   auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
   LOG(INFO) << "Time elapsed: " << duration << " us";
 
-  Eigen::Map<Eigen::Quaterniond> R(T);
-  Eigen::Map<Eigen::Vector3d> t(T + 4);
+  Eigen::Map<Eigen::Quaterniond> R(T.data());
+  Eigen::Map<Eigen::Vector3d> t(T.data() + 4);
 
   LOG(INFO) << "iterations: " << iterations;
   LOG(INFO) << "R: " << R.coeffs().transpose();
@@ -420,6 +422,66 @@ int main(int argc, char** argv)
   LOG(INFO) << "iterations: " << icp.nr_iterations_;
   LOG(INFO) << "R_opt: " << Eigen::Quaternionf(T_icp.rotation()).coeffs().transpose();
   LOG(INFO) << "t_opt: " << T_icp.translation().transpose();
+
+
+  LOG(INFO) << "======================== Point to Plane ICP ========================";
+  LOG(INFO) << "------------------- Ceres ------------------";
+  T = {R_init.x(), R_init.y(), R_init.z(), R_init.w(), t_init.x(), t_init.y(), t_init.z()};
+
+  last_R = R_init;
+  last_t = t_init;
+  start = std::chrono::high_resolution_clock::now();
+  for (iterations = 0; iterations < 50; ++iterations) {
+    Eigen::Affine3d T_opt(Eigen::Translation3d(last_t) * last_R.toRotationMatrix());
+    pcl::transformPointCloud(*source_points, *source_points_transformed, T_opt);
+
+    ceres::ProductManifold<ceres::EigenQuaternionManifold, ceres::EuclideanManifold<3>>* se3 =
+      new ceres::ProductManifold<ceres::EigenQuaternionManifold, ceres::EuclideanManifold<3>>;
+    ceres::Problem problem;
+    problem.AddParameterBlock(T.data(), 7, se3);
+
+    for (int i = 0; i < source_points->size(); i++) {
+      // 最近邻搜索
+      std::vector<int> nn_indices(1);
+      std::vector<float> nn_distances(1);
+      kdtree.nearestKSearch(source_points_transformed->at(i), 5, nn_indices, nn_distances);
+
+      if (nn_distances[0] > 0.5) continue;
+
+      
+      ceres::CostFunction* cost_function = new ceres::AutoDiffCostFunction<CeresCostFunctor, 3, 7>(
+        new CeresCostFunctor(source_points->at(i), target_points->at(nn_indices[0])));
+      problem.AddResidualBlock(cost_function, nullptr, T.data());
+    }
+
+    ceres::Solver::Options options;
+    options.max_num_iterations = 1;
+    options.linear_solver_type = ceres::SPARSE_NORMAL_CHOLESKY;
+    options.minimizer_progress_to_stdout = false;
+    ceres::Solver::Summary summary;
+    ceres::Solve(options, &problem, &summary);
+
+    Eigen::Map<Eigen::Quaterniond> R(T.data());
+    Eigen::Map<Eigen::Vector3d> t(T.data() + 4);
+    if ((R.coeffs() - last_R.coeffs()).norm() < 1e-5 && (t - last_t).norm() < 1e-5) {
+      break;
+    }
+    last_R = R;
+    last_t = t;
+  }
+  end = std::chrono::high_resolution_clock::now();
+  duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+  LOG(INFO) << "Time elapsed: " << duration << " us";
+
+  Eigen::Map<Eigen::Quaterniond> R_p2p(T.data());
+  Eigen::Map<Eigen::Vector3d> t_p2p(T.data() + 4);
+
+  LOG(INFO) << "iterations: " << iterations;
+  LOG(INFO) << "R: " << R_p2p.coeffs().transpose();
+  LOG(INFO) << "t: " << t_p2p.transpose();
+
+
+
 
   return 0;
 }
