@@ -12,6 +12,8 @@
 #include <pcl/point_types.h>
 #include <pcl/point_cloud.h>
 #include <pcl/kdtree/kdtree_flann.h>
+#include <pcl/common/transforms.h>
+
 #include <gtsam/geometry/Rot3.h>
 #include <gtsam/geometry/Pose3.h>
 #include <gtsam/inference/Symbol.h>
@@ -19,127 +21,7 @@
 #include <gtsam/nonlinear/Values.h>
 #include <gtsam/nonlinear/GaussNewtonOptimizer.h>
 
-struct PlaneSolver {
-  PlaneSolver(Eigen::Vector3d curr_point_, Eigen::Vector3d curr_normal_,
-              Eigen::Vector3d target_point_, Eigen::Vector3d target_normal_)
-      : curr_point(curr_point_), curr_normal(curr_normal_),
-        target_point(target_point_), target_normal(target_normal_){};
-  template <typename T>
-  bool operator()(const T *q, const T *t, T *residual) const {
-    Eigen::Quaternion<T> q_w_curr{q[3], q[0], q[1], q[2]};
-    Eigen::Matrix<T, 3, 1> t_w_curr{t[0], t[1], t[2]};
-    Eigen::Matrix<T, 3, 1> cp{T(curr_point.x()), T(curr_point.y()),
-                              T(curr_point.z())};
-    Eigen::Matrix<T, 3, 1> point_w;
-    point_w = q_w_curr * cp + t_w_curr;
-    Eigen::Matrix<T, 3, 1> point_target(
-        T(target_point.x()), T(target_point.y()), T(target_point.z()));
-    Eigen::Matrix<T, 3, 1> norm(T(target_normal.x()), T(target_normal.y()),
-                                T(target_normal.z()));
-    residual[0] = norm.dot(point_w - point_target);
-    return true;
-  }
-
-  static ceres::CostFunction *Create(const Eigen::Vector3d curr_point_,
-                                     const Eigen::Vector3d curr_normal_,
-                                     Eigen::Vector3d target_point_,
-                                     Eigen::Vector3d target_normal_) {
-    return (
-        new ceres::AutoDiffCostFunction<PlaneSolver, 1, 4, 3>(new PlaneSolver(
-            curr_point_, curr_normal_, target_point_, target_normal_)));
-  }
-
-  Eigen::Vector3d curr_point;
-  Eigen::Vector3d curr_normal;
-  Eigen::Vector3d target_point;
-  Eigen::Vector3d target_normal;
-};
-
-// https://github.com/hku-mars/STD/blob/6e5903cfa2aaed5ca3c9e7d21424eebcca7655bb/src/STDesc.cpp#L1387
-void PlaneGeomrtricIcp(
-    const pcl::PointCloud<pcl::PointXYZINormal>::Ptr &source_cloud,
-    const pcl::PointCloud<pcl::PointXYZINormal>::Ptr &target_cloud,
-    std::pair<Eigen::Vector3d, Eigen::Matrix3d> &transform) {
-  pcl::KdTreeFLANN<pcl::PointXYZ>::Ptr kd_tree(
-      new pcl::KdTreeFLANN<pcl::PointXYZ>);
-  pcl::PointCloud<pcl::PointXYZ>::Ptr input_cloud(
-      new pcl::PointCloud<pcl::PointXYZ>);
-  for (size_t i = 0; i < target_cloud->size(); i++) {
-    pcl::PointXYZ pi;
-    pi.x = target_cloud->points[i].x;
-    pi.y = target_cloud->points[i].y;
-    pi.z = target_cloud->points[i].z;
-    input_cloud->push_back(pi);
-  }
-  kd_tree->setInputCloud(input_cloud);
-  ceres::Manifold *quaternion_manifold = new ceres::EigenQuaternionManifold;
-  ceres::Problem problem;
-  ceres::LossFunction *loss_function = nullptr;
-  Eigen::Matrix3d rot = transform.second;
-  Eigen::Quaterniond q(rot);
-  Eigen::Vector3d t = transform.first;
-  double para_q[4] = {q.x(), q.y(), q.z(), q.w()};
-  double para_t[3] = {t(0), t(1), t(2)};
-  problem.AddParameterBlock(para_q, 4, quaternion_manifold);
-  problem.AddParameterBlock(para_t, 3);
-  Eigen::Map<Eigen::Quaterniond> q_last_curr(para_q);
-  Eigen::Map<Eigen::Vector3d> t_last_curr(para_t);
-  std::vector<int> pointIdxNKNSearch(1);
-  std::vector<float> pointNKNSquaredDistance(1);
-  int useful_match = 0;
-  for (size_t i = 0; i < source_cloud->size(); i++) {
-    pcl::PointXYZINormal searchPoint = source_cloud->points[i];
-    Eigen::Vector3d pi(searchPoint.x, searchPoint.y, searchPoint.z);
-    pi = rot * pi + t;
-    pcl::PointXYZ use_search_point;
-    use_search_point.x = pi[0];
-    use_search_point.y = pi[1];
-    use_search_point.z = pi[2];
-    Eigen::Vector3d ni(searchPoint.normal_x, searchPoint.normal_y,
-                       searchPoint.normal_z);
-    ni = rot * ni;
-    if (kd_tree->nearestKSearch(use_search_point, 1, pointIdxNKNSearch,
-                                pointNKNSquaredDistance) > 0) {
-      pcl::PointXYZINormal nearstPoint =
-          target_cloud->points[pointIdxNKNSearch[0]];
-      Eigen::Vector3d tpi(nearstPoint.x, nearstPoint.y, nearstPoint.z);
-      Eigen::Vector3d tni(nearstPoint.normal_x, nearstPoint.normal_y,
-                          nearstPoint.normal_z);
-      Eigen::Vector3d normal_inc = ni - tni;
-      Eigen::Vector3d normal_add = ni + tni;
-      double point_to_point_dis = (pi - tpi).norm();
-      double point_to_plane = fabs(tni.transpose() * (pi - tpi));
-      if ((normal_inc.norm() < 0.1 ||
-           normal_add.norm() < 0.1) &&
-          point_to_plane < 0.3 &&
-          point_to_point_dis < 3) {
-        useful_match++;
-        ceres::CostFunction *cost_function;
-        Eigen::Vector3d curr_point(source_cloud->points[i].x,
-                                   source_cloud->points[i].y,
-                                   source_cloud->points[i].z);
-        Eigen::Vector3d curr_normal(source_cloud->points[i].normal_x,
-                                    source_cloud->points[i].normal_y,
-                                    source_cloud->points[i].normal_z);
-
-        cost_function = PlaneSolver::Create(curr_point, curr_normal, tpi, tni);
-        problem.AddResidualBlock(cost_function, loss_function, para_q, para_t);
-      }
-    }
-  }
-  ceres::Solver::Options options;
-  options.linear_solver_type = ceres::SPARSE_NORMAL_CHOLESKY;
-  options.max_num_iterations = 100;
-  options.minimizer_progress_to_stdout = true;
-  ceres::Solver::Summary summary;
-  ceres::Solve(options, &problem, &summary);
-  Eigen::Quaterniond q_opt(para_q[3], para_q[0], para_q[1], para_q[2]);
-  rot = q_opt.toRotationMatrix();
-  t << t_last_curr(0), t_last_curr(1), t_last_curr(2);
-  transform.first = t;
-  transform.second = rot;
-  LOG(INFO) << "useful match for icp:" << useful_match;
-}
+#include <optimization_learning/so3_tool.hpp>
 
 // https://github.com/gaoxiang12/slam_in_autonomous_driving/blob/eb65a948353019a17c1d1ccb9ff8784bd25a6adf/src/common/math_utils.h#L112
 template <typename S>
@@ -184,10 +66,10 @@ public:
   CeresCostFunctorP2Plane(
     const pcl::PointXYZI& curr_point,
     const pcl::PointXYZI& target_point,
-    const pcl::Normal& normal)
+    const Eigen::Vector3d& normal)
   : curr_point_(curr_point.x, curr_point.y, curr_point.z),
     target_point_(target_point.x, target_point.y, target_point.z),
-    normal_(normal.normal_x, normal.normal_y, normal.normal_z)
+    normal_(normal)
   {
   }
 
@@ -197,7 +79,8 @@ public:
     Eigen::Map<const Eigen::Quaternion<T>> R(se3);
     Eigen::Map<const Eigen::Matrix<T, 3, 1>> t(se3 + 4);
 
-    residual = normal_.cast<T>().transpose() * (R * curr_point_.cast<T>() + t - target_point_.cast<T>());
+    residual[0] =
+      normal_.cast<T>().transpose() * (R * curr_point_.cast<T>() + t - target_point_.cast<T>());
     return true;
   }
 
@@ -228,12 +111,12 @@ public:
     gtsam::Key key,
     const pcl::PointXYZI& source_point,
     const pcl::PointXYZI& target_point,
-    const pcl::Normal& normal,
+    const Eigen::Vector3d& normal,
     const gtsam::SharedNoiseModel& cost_model)
   : gtsam::NoiseModelFactor1<gtsam::Pose3>(cost_model, key),
     source_point_(source_point.x, source_point.y, source_point.z),
     target_point_(target_point.x, target_point.y, target_point.z),
-    normal_(normal.normal_x, normal.normal_y, normal.normal_z)
+    normal_(normal)
   {
   }
 
@@ -284,12 +167,12 @@ public:
     gtsam::Key key2,
     const pcl::PointXYZI& source_point,
     const pcl::PointXYZI& target_point,
-    const pcl::Normal& normal,
+    const Eigen::Vector3d& normal,
     const gtsam::SharedNoiseModel& cost_model)
   : gtsam::NoiseModelFactor2<gtsam::Rot3, gtsam::Point3>(cost_model, key1, key2),
     source_point_(source_point.x, source_point.y, source_point.z),
     target_point_(target_point.x, target_point.y, target_point.z),
-    normal_(normal.normal_x, normal.normal_y, normal.normal_z)
+    normal_(normal)
   {
   }
 
@@ -315,3 +198,99 @@ private:
   gtsam::Point3 target_point_;
   gtsam::Point3 normal_;
 };
+
+// Gauss-Newton's method solve NICP.
+template <typename PointT>
+bool MatchP2Plane(
+  const typename pcl::PointCloud<PointT>::Ptr& source_cloud_ptr,
+  const Eigen::Matrix4d& predict_pose,
+  const typename pcl::PointCloud<PointT>::Ptr& target_cloud_ptr,
+  Eigen::Affine3d& result_pose)
+{
+  bool has_converge_ = false;
+  int max_iterations_ = 30;
+  double max_correspond_distance_ = 0.5;
+  double transformation_epsilon_ = 1e-3;
+
+  typename pcl::PointCloud<PointT>::Ptr transformed_cloud(new pcl::PointCloud<PointT>);
+  typename pcl::KdTreeFLANN<PointT>::Ptr kdtree_flann_ptr_(new pcl::KdTreeFLANN<PointT>());
+  kdtree_flann_ptr_->setInputCloud(target_cloud_ptr);
+
+  Eigen::Matrix4d T = predict_pose;
+
+  // Gauss-Newton's method solve ICP.
+  unsigned int i = 0;
+  for (; i < max_iterations_; ++i) {
+    pcl::transformPointCloud(*source_cloud_ptr, *transformed_cloud, T);
+    Eigen::Matrix<double, 6, 6> Hessian = Eigen::Matrix<double, 6, 6>::Zero();
+    Eigen::Matrix<double, 6, 1> B = Eigen::Matrix<double, 6, 1>::Zero();
+
+    for (unsigned int j = 0; j < transformed_cloud->size(); ++j) {
+      const PointT& origin_point = source_cloud_ptr->points[j];
+
+      // 删除距离为无穷点
+      if (!pcl::isFinite(origin_point)) {
+        continue;
+      }
+
+      const PointT& transformed_point = transformed_cloud->at(j);
+      std::vector<int> nn_indices(1);
+      std::vector<float> nn_distances(1);
+      kdtree_flann_ptr_->nearestKSearch(transformed_point, 5, nn_indices, nn_distances);
+
+      std::vector<Eigen::Vector3d> plane_points;
+      for (size_t i = 0; i < 5; ++i) {
+        plane_points.emplace_back(
+          target_cloud_ptr->at(nn_indices[i]).x,
+          target_cloud_ptr->at(nn_indices[i]).y,
+          target_cloud_ptr->at(nn_indices[i]).z);
+      }
+      Eigen::Matrix<double, 4, 1> plane_coeffs;
+       if (nn_distances[0] > 1 || !FitPlane(plane_points, plane_coeffs)) {
+        continue;
+      }
+
+      Eigen::Vector3d normal = plane_coeffs.head<3>();
+
+      Eigen::Vector3d nearest_point = Eigen::Vector3d(
+        target_cloud_ptr->at(nn_indices.front()).x,
+        target_cloud_ptr->at(nn_indices.front()).y,
+        target_cloud_ptr->at(nn_indices.front()).z);
+
+      Eigen::Vector3d point_eigen(transformed_point.x, transformed_point.y, transformed_point.z);
+      Eigen::Vector3d origin_point_eigen(origin_point.x, origin_point.y, origin_point.z);
+      double error = normal.transpose() * (point_eigen - nearest_point);
+
+      Eigen::Matrix<double, 1, 6> Jacobian = Eigen::Matrix<double, 1, 6>::Zero();
+      // 构建雅克比矩阵
+      Jacobian.leftCols(3) = normal.transpose();
+      Jacobian.rightCols(3) = -normal.transpose() * T.block<3, 3>(0, 0) * Hat(origin_point_eigen);
+
+      // 构建海森矩阵
+      Hessian += Jacobian.transpose() * Jacobian;
+      B += -Jacobian.transpose() * error;
+    }
+
+    if (Hessian.determinant() == 0) {
+      continue;
+    }
+
+    Eigen::Matrix<double, 6, 1> delta_x = Hessian.inverse() * B;
+
+    T.block<3, 1>(0, 3) = T.block<3, 1>(0, 3) + delta_x.head(3);
+    T.block<3, 3>(0, 0) *= Exp(delta_x.tail(3)).matrix();
+
+    if (delta_x.norm() < transformation_epsilon_) {
+      has_converge_ = true;
+      break;
+    }
+
+    // debug
+    // LOG(INFO) << "i= " << i << "  norm delta x= " << delta_x.norm();
+  }
+  LOG(INFO) << "iterations: " << i;
+
+  result_pose = T;
+
+  return true;
+}

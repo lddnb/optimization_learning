@@ -22,94 +22,6 @@
 #include "optimization_learning/icp.hpp"
 #include "optimization_learning/point_to_plane_icp.hpp"
 
-
-// https://github.com/zm0612/optimized_ICP/blob/be8651addd630c472418cf530a53623946906831/optimized_ICP_GN.cpp#L17
-bool Match(
-  const pcl::PointCloud<pcl::PointXYZI>::Ptr& source_cloud_ptr,
-  const Eigen::Matrix4d& predict_pose,
-  const pcl::PointCloud<pcl::PointXYZI>::Ptr& target_cloud_ptr,
-  Eigen::Affine3d& result_pose)
-{
-  bool has_converge_ = false;
-  int max_iterations_ = 30;
-  double max_correspond_distance_ = 0.5;
-  double transformation_epsilon_ = 1e-5;
-
-  pcl::PointCloud<pcl::PointXYZI>::Ptr transformed_cloud(new pcl::PointCloud<pcl::PointXYZI>);
-  pcl::KdTreeFLANN<pcl::PointXYZI>::Ptr kdtree_flann_ptr_(new pcl::KdTreeFLANN<pcl::PointXYZI>());
-  kdtree_flann_ptr_->setInputCloud(target_cloud_ptr);
-
-  Eigen::Matrix4d T = predict_pose;
-
-  // Gauss-Newton's method solve ICP.
-  unsigned int i = 0;
-  for (; i < max_iterations_; ++i) {
-    pcl::transformPointCloud(*source_cloud_ptr, *transformed_cloud, T);
-    Eigen::Matrix<double, 6, 6> Hessian = Eigen::Matrix<double, 6, 6>::Zero();
-    Eigen::Matrix<double, 6, 1> B = Eigen::Matrix<double, 6, 1>::Zero();
-
-    for (unsigned int j = 0; j < transformed_cloud->size(); ++j) {
-      const pcl::PointXYZI& origin_point = source_cloud_ptr->points[j];
-
-      // 删除距离为无穷点
-      if (!pcl::isFinite(origin_point)) {
-        continue;
-      }
-
-      const pcl::PointXYZI& transformed_point = transformed_cloud->at(j);
-      std::vector<float> resultant_distances;
-      std::vector<int> indices;
-      // 在目标点云中搜索距离当前点最近的一个点
-      kdtree_flann_ptr_->nearestKSearch(transformed_point, 1, indices, resultant_distances);
-
-      // 舍弃那些最近点,但是距离大于最大对应点对距离
-      if (resultant_distances.front() > max_correspond_distance_) {
-        continue;
-      }
-
-      Eigen::Vector3d nearest_point = Eigen::Vector3d(
-        target_cloud_ptr->at(indices.front()).x,
-        target_cloud_ptr->at(indices.front()).y,
-        target_cloud_ptr->at(indices.front()).z);
-
-      Eigen::Vector3d point_eigen(transformed_point.x, transformed_point.y, transformed_point.z);
-      Eigen::Vector3d origin_point_eigen(origin_point.x, origin_point.y, origin_point.z);
-      Eigen::Vector3d error = point_eigen - nearest_point;
-
-      Eigen::Matrix<double, 3, 6> Jacobian = Eigen::Matrix<double, 3, 6>::Zero();
-      // 构建雅克比矩阵
-      Jacobian.leftCols(3) = Eigen::Matrix3d::Identity();
-      Jacobian.rightCols(3) = -T.block<3, 3>(0, 0) * Hat(origin_point_eigen);
-
-      // 构建海森矩阵
-      Hessian += Jacobian.transpose() * Jacobian;
-      B += -Jacobian.transpose() * error;
-    }
-
-    if (Hessian.determinant() == 0) {
-      continue;
-    }
-
-    Eigen::Matrix<double, 6, 1> delta_x = Hessian.inverse() * B;
-
-    T.block<3, 1>(0, 3) = T.block<3, 1>(0, 3) + delta_x.head(3);
-    T.block<3, 3>(0, 0) *= Exp(delta_x.tail(3)).matrix();
-
-    if (delta_x.norm() < transformation_epsilon_) {
-      has_converge_ = true;
-      break;
-    }
-
-    // debug
-    // LOG(INFO) << "i= " << i << "  norm delta x= " << delta_x.norm();
-  }
-  LOG(INFO) << "iterations: " << i;
-
-  result_pose = T;
-
-  return true;
-}
-
 bool next_iteration = false;
 void keyboardEventOccurred(const pcl::visualization::KeyboardEvent& event, void* nothing)
 {
@@ -158,16 +70,16 @@ int main(int argc, char** argv)
   LOG(INFO) << "R_Ture: " << R_ture.coeffs().transpose();
   LOG(INFO) << "t_ture: " << t_ture.transpose();
 
-  pcl::visualization::PCLVisualizer::Ptr viewer(new pcl::visualization::PCLVisualizer("3D Viewer"));
-  viewer->setBackgroundColor(0, 0, 0);
-  int v1(0);
-  int v2(1);
-  viewer->addPointCloud<pcl::PointXYZI>(source_points, "source_points");
-  viewer->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_COLOR, 1.0, 0.0, 0.0, "source_points");  // 红色
-  viewer->addPointCloud<pcl::PointXYZI>(target_points, "target_points");
-  viewer->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_COLOR, 0.0, 1.0, 0.0, "target_points");  // 绿色
-  viewer->addPointCloud<pcl::PointXYZI>(source_points_transformed, "source_points_transformed");
-  viewer->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_COLOR, 0.0, 0.0, 1.0, "source_points_transformed");  // 蓝色
+  // pcl::visualization::PCLVisualizer::Ptr viewer(new pcl::visualization::PCLVisualizer("3D Viewer"));
+  // viewer->setBackgroundColor(0, 0, 0);
+  // int v1(0);
+  // int v2(1);
+  // viewer->addPointCloud<pcl::PointXYZI>(source_points, "source_points");
+  // viewer->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_COLOR, 1.0, 0.0, 0.0, "source_points");  // 红色
+  // viewer->addPointCloud<pcl::PointXYZI>(target_points, "target_points");
+  // viewer->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_COLOR, 0.0, 1.0, 0.0, "target_points");  // 绿色
+  // viewer->addPointCloud<pcl::PointXYZI>(source_points_transformed, "source_points_transformed");
+  // viewer->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_COLOR, 0.0, 0.0, 1.0, "source_points_transformed");  // 蓝色
 
   // viewer->spin();
 
@@ -352,50 +264,10 @@ int main(int argc, char** argv)
   LOG(INFO) << "R: " << T_result.rotation().toQuaternion();
   LOG(INFO) << "t: " << T_result.translation().transpose();
 
-  // LOG(INFO) << "------------------- STD ------------------";
-  // // 计算法向量
-  // pcl::PointCloud<pcl::PointXYZINormal>::Ptr source_cloud(new pcl::PointCloud<pcl::PointXYZINormal>);
-  // pcl::PointCloud<pcl::PointXYZINormal>::Ptr target_cloud(new pcl::PointCloud<pcl::PointXYZINormal>);
-  // pcl::copyPointCloud(*source_points, *source_cloud);
-  // pcl::copyPointCloud(*target_points, *target_cloud);
-
-  // pcl::NormalEstimationOMP<pcl::PointXYZI, pcl::Normal> norm_est;
-  // pcl::PointCloud<pcl::Normal>::Ptr normals(new pcl::PointCloud<pcl::Normal>);
-  // pcl::search::KdTree<pcl::PointXYZI>::Ptr tree(new pcl::search::KdTree<pcl::PointXYZI>());
-  // norm_est.setKSearch(30);
-  // norm_est.setNumberOfThreads(10);
-  // norm_est.setSearchMethod(tree);
-  // norm_est.setInputCloud(source_points);
-  // norm_est.compute(*normals);
-
-  // for (int i = 0; i < source_cloud->size(); ++i) {
-  //   source_cloud->at(i).normal_x = normals->at(i).normal_x;
-  //   source_cloud->at(i).normal_y = normals->at(i).normal_y;
-  //   source_cloud->at(i).normal_z = normals->at(i).normal_z;
-  // }
-
-  // norm_est.setInputCloud(target_points);
-  // norm_est.compute(*normals);
-
-  // for (int i = 0; i < target_cloud->size(); ++i) {
-  //   target_cloud->at(i).normal_x = normals->at(i).normal_x;
-  //   target_cloud->at(i).normal_y = normals->at(i).normal_y;
-  //   target_cloud->at(i).normal_z = normals->at(i).normal_z;
-  // }
-  
-  // std::pair<Eigen::Vector3d, Eigen::Matrix3d> transform;
-  // transform.first = t_init;
-  // transform.second = R_init.toRotationMatrix();
-  // PlaneGeomrtricIcp(source_cloud, target_cloud, transform);
-
-  // LOG(INFO) << "R_opt: " << Eigen::Quaterniond(transform.second).coeffs().transpose();
-  // LOG(INFO) << "t_opt: " << transform.first.transpose();
-
-
   LOG(INFO) << "------------------- GN ------------------";
   start = std::chrono::high_resolution_clock::now();
   Eigen::Affine3d T_opt = T_init;
-  Match(source_points, T_init.matrix(), target_points, T_opt);
+  MatchP2P<pcl::PointXYZI>(source_points, T_init.matrix(), target_points, T_opt);
   end = std::chrono::high_resolution_clock::now();
   duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
   LOG(INFO) << "Time elapsed: " << duration << " us";
@@ -403,7 +275,7 @@ int main(int argc, char** argv)
   LOG(INFO) << "R_opt: " << Eigen::Quaterniond(T_opt.rotation()).coeffs().transpose();
   LOG(INFO) << "t_opt: " << T_opt.translation().transpose();
 
-  LOG(INFO) << "------------------- ICP ------------------";
+  LOG(INFO) << "------------------- PCL ICP ------------------";
   start = std::chrono::high_resolution_clock::now();
   pcl::IterativeClosestPoint<pcl::PointXYZI, pcl::PointXYZI> icp;
   icp.setInputSource(source_points);
@@ -413,7 +285,8 @@ int main(int argc, char** argv)
   icp.setEuclideanFitnessEpsilon(1e-5);
   icp.setMaximumIterations(30);
 
-  icp.align(*source_points, T_init.matrix().cast<float>());
+  pcl::PointCloud<pcl::PointXYZI>::Ptr aligned(new pcl::PointCloud<pcl::PointXYZI>);
+  icp.align(*aligned, T_init.matrix().cast<float>());
   end = std::chrono::high_resolution_clock::now();
   duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
   LOG(INFO) << "Time elapsed: " << duration << " us";
@@ -446,11 +319,20 @@ int main(int argc, char** argv)
       std::vector<float> nn_distances(1);
       kdtree.nearestKSearch(source_points_transformed->at(i), 5, nn_indices, nn_distances);
 
-      if (nn_distances[0] > 0.5) continue;
+      std::vector<Eigen::Vector3d> plane_points;
+      for (size_t i = 0; i < 5; ++i) {
+        plane_points.emplace_back(
+          target_points->at(nn_indices[i]).x,
+          target_points->at(nn_indices[i]).y,
+          target_points->at(nn_indices[i]).z);
+      }
+      Eigen::Matrix<double, 4, 1> plane_coeffs;
+      if (nn_distances[0] > 1 || !FitPlane(plane_points, plane_coeffs)) {
+        continue;
+      }
 
-      
-      ceres::CostFunction* cost_function = new ceres::AutoDiffCostFunction<CeresCostFunctor, 3, 7>(
-        new CeresCostFunctor(source_points->at(i), target_points->at(nn_indices[0])));
+      ceres::CostFunction* cost_function = new ceres::AutoDiffCostFunction<CeresCostFunctorP2Plane, 1, 7>(
+        new CeresCostFunctorP2Plane(source_points->at(i), target_points->at(nn_indices[0]), plane_coeffs.head<3>()));
       problem.AddResidualBlock(cost_function, nullptr, T.data());
     }
 
@@ -463,7 +345,8 @@ int main(int argc, char** argv)
 
     Eigen::Map<Eigen::Quaterniond> R(T.data());
     Eigen::Map<Eigen::Vector3d> t(T.data() + 4);
-    if ((R.coeffs() - last_R.coeffs()).norm() < 1e-5 && (t - last_t).norm() < 1e-5) {
+    // todo：收敛阈值过小时会在两个点之间来回迭代，到达最大迭代次数后退出，原因未知
+    if ((R.coeffs() - last_R.coeffs()).norm() < 1e-3 && (t - last_t).norm() < 1e-3) {
       break;
     }
     last_R = R;
@@ -480,8 +363,170 @@ int main(int argc, char** argv)
   LOG(INFO) << "R: " << R_p2p.coeffs().transpose();
   LOG(INFO) << "t: " << t_p2p.transpose();
 
+  LOG(INFO) << "------------------- GTSAM SE3 ------------------";
+  gtsam::SharedNoiseModel noise_model2 = gtsam::noiseModel::Isotropic::Sigma(1, 1);
+  gtsam::GaussNewtonParams params_gn2;
+  // params_gn2.setVerbosity("ERROR");
+  params_gn2.maxIterations = 1;
+  params_gn2.relativeErrorTol = 1e-5;
+  start = std::chrono::high_resolution_clock::now();
+  last_T_gtsam = gtsam::Pose3(gtsam::Rot3(R_init), gtsam::Point3(t_init));
+  for (iterations = 0; iterations < 50; ++iterations) {
+    Eigen::Affine3d T_opt(last_T_gtsam.matrix());
+    pcl::transformPointCloud(*source_points, *source_points_transformed, T_opt);
 
+    gtsam::NonlinearFactorGraph graph;
+    for (int i = 0; i < source_points->size(); ++i) {
+      std::vector<int> nn_indices(1);
+      std::vector<float> nn_distances(1);
+      kdtree.nearestKSearch(source_points_transformed->at(i), 5, nn_indices, nn_distances);
 
+      std::vector<Eigen::Vector3d> plane_points;
+      for (size_t i = 0; i < 5; ++i) {
+        plane_points.emplace_back(
+          target_points->at(nn_indices[i]).x,
+          target_points->at(nn_indices[i]).y,
+          target_points->at(nn_indices[i]).z);
+      }
+      Eigen::Matrix<double, 4, 1> plane_coeffs;
+       if (nn_distances[0] > 1 || !FitPlane(plane_points, plane_coeffs)) {
+        continue;
+      }
 
+      graph.emplace_shared<GtsamIcpFactorP2Plane>(key, source_points->at(i), target_points->at(nn_indices[0]), plane_coeffs.head<3>(), noise_model2);
+    }
+
+    gtsam::Values initial_estimate;
+    initial_estimate.insert(key, last_T_gtsam);
+    gtsam::GaussNewtonOptimizer optimizer(graph, initial_estimate, params_gn2);
+    optimizer.optimize();
+
+    result = optimizer.values();
+    gtsam::Pose3 T_result = result.at<gtsam::Pose3>(key);
+
+    if (
+      (last_T_gtsam.rotation().toQuaternion().coeffs() - T_result.rotation().toQuaternion().coeffs()).norm() < 1e-3 &&
+      (last_T_gtsam.translation() - T_result.translation()).norm() < 1e-3) {
+      break;
+    }
+    last_T_gtsam = T_result;
+  }
+
+  end = std::chrono::high_resolution_clock::now();
+  duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+  LOG(INFO) << "GTSAM SE3 solve time: " << duration << " us";
+
+  T_result = result.at<gtsam::Pose3>(key);
+  LOG(INFO) << "iterations: " << iterations;
+  LOG(INFO) << "R: " << T_result.rotation().toQuaternion();
+  LOG(INFO) << "t: " << T_result.translation().transpose();
+
+  LOG(INFO) << "------------------- GTSAM SO3+R3 ------------------";
+  start = std::chrono::high_resolution_clock::now();
+  last_R_gtsam = gtsam::Rot3(R_init);
+  last_t_gtsam = gtsam::Point3(t_init);
+  for (iterations = 0; iterations < 50; ++iterations) {
+    Eigen::Affine3d T_opt(Eigen::Translation3d(last_t_gtsam) * last_R_gtsam.matrix());
+    pcl::transformPointCloud(*source_points, *source_points_transformed, T_opt);
+
+    gtsam::NonlinearFactorGraph graph;
+    for (int i = 0; i < source_points->size(); ++i) {
+      std::vector<int> nn_indices(1);
+      std::vector<float> nn_distances(1);
+      kdtree.nearestKSearch(source_points_transformed->at(i), 5, nn_indices, nn_distances);
+
+      std::vector<Eigen::Vector3d> plane_points;
+      for (size_t i = 0; i < 5; ++i) {
+        plane_points.emplace_back(
+          target_points->at(nn_indices[i]).x,
+          target_points->at(nn_indices[i]).y,
+          target_points->at(nn_indices[i]).z);
+      }
+      Eigen::Matrix<double, 4, 1> plane_coeffs;
+       if (nn_distances[0] > 1 || !FitPlane(plane_points, plane_coeffs)) {
+        continue;
+      }
+      graph.emplace_shared<GtsamIcpFactorP2Plane2>(key, key2, source_points->at(i), target_points->at(nn_indices[0]), plane_coeffs.head<3>(), noise_model2);
+    }
+
+    gtsam::Values initial_estimate;
+    initial_estimate.insert(key, last_R_gtsam);
+    initial_estimate.insert(key2, last_t_gtsam);
+    gtsam::GaussNewtonOptimizer optimizer(graph, initial_estimate, params_gn2);
+
+    optimizer.optimize();
+
+    result = optimizer.values();
+    gtsam::Rot3 R_result = result.at<gtsam::Rot3>(key);
+    gtsam::Point3 t_result = result.at<gtsam::Point3>(key2);
+
+    if (
+      (R_result.toQuaternion().coeffs() - last_R_gtsam.toQuaternion().coeffs()).norm() < 1e-3 &&
+      (t_result - last_t_gtsam).norm() < 1e-3) {
+      break;
+    }
+    last_R_gtsam = R_result;
+    last_t_gtsam = t_result;
+  }
+
+  end = std::chrono::high_resolution_clock::now();
+  duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+  LOG(INFO) << "GTSAM SO3+R3 solve time: " << duration << " us";
+
+  R_result = result.at<gtsam::Rot3>(key);
+  t_result = result.at<gtsam::Point3>(key2);
+  LOG(INFO) << "iterations: " << iterations;
+  LOG(INFO) << "R: " << R_result.toQuaternion();
+  LOG(INFO) << "t: " << t_result.transpose();
+
+  LOG(INFO) << "------------------- GN ------------------";
+  start = std::chrono::high_resolution_clock::now();
+  T_opt = T_init;
+  MatchP2Plane<pcl::PointXYZI>(source_points, T_init.matrix(), target_points, T_opt);
+  end = std::chrono::high_resolution_clock::now();
+  duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+  LOG(INFO) << "Time elapsed: " << duration << " us";
+
+  LOG(INFO) << "R_opt: " << Eigen::Quaterniond(T_opt.rotation()).coeffs().transpose();
+  LOG(INFO) << "t_opt: " << T_opt.translation().transpose();
+
+  LOG(INFO) << "------------------- PCL NICP ------------------";
+  start = std::chrono::high_resolution_clock::now();
+  pcl::PointCloud<pcl::PointXYZINormal>::Ptr source_cloud_with_normal(new pcl::PointCloud<pcl::PointXYZINormal>);
+  pcl::PointCloud<pcl::PointXYZINormal>::Ptr target_cloud_with_normal(new pcl::PointCloud<pcl::PointXYZINormal>);
+  pcl::NormalEstimationOMP<pcl::PointXYZI, pcl::Normal> norm_est;
+  pcl::PointCloud<pcl::Normal>::Ptr normals(new pcl::PointCloud<pcl::Normal>);
+  pcl::search::KdTree<pcl::PointXYZI>::Ptr tree(new pcl::search::KdTree<pcl::PointXYZI>());
+  norm_est.setKSearch(10);
+  norm_est.setNumberOfThreads(10);
+  norm_est.setSearchMethod(tree);
+  norm_est.setInputCloud(source_points);
+  norm_est.compute(*normals);
+  pcl::concatenateFields(*source_points, *normals, *source_cloud_with_normal);
+
+  norm_est.setInputCloud(target_points);
+  norm_est.compute(*normals);
+  pcl::concatenateFields(*target_points, *normals, *target_cloud_with_normal);
+
+  pcl::IterativeClosestPointWithNormals<pcl::PointXYZINormal, pcl::PointXYZINormal> nicp;
+  nicp.setInputSource(source_cloud_with_normal);
+  nicp.setInputTarget(target_cloud_with_normal);
+  nicp.setMaxCorrespondenceDistance(0.5);
+  nicp.setTransformationEpsilon(1e-5);
+  nicp.setEuclideanFitnessEpsilon(1e-5);
+  nicp.setMaximumIterations(30);
+
+  pcl::PointCloud<pcl::PointXYZINormal>::Ptr aligned2(new pcl::PointCloud<pcl::PointXYZINormal>);
+  nicp.align(*aligned2, T_init.matrix().cast<float>());
+  end = std::chrono::high_resolution_clock::now();
+  duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+  LOG(INFO) << "Time elapsed: " << duration << " us";
+
+  T_icp = nicp.getFinalTransformation();
+  LOG(INFO) << "iterations: " << nicp.nr_iterations_;
+  LOG(INFO) << "R_opt: " << Eigen::Quaternionf(T_icp.rotation()).coeffs().transpose();
+  LOG(INFO) << "t_opt: " << T_icp.translation().transpose();
+
+  LOG(INFO) << "======================== Generalized ICP ========================";
   return 0;
 }

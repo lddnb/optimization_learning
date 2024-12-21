@@ -17,6 +17,9 @@
 #include <gtsam/nonlinear/Values.h>
 #include <gtsam/nonlinear/GaussNewtonOptimizer.h>
 #include <pcl/point_types.h>
+#include <pcl/point_cloud.h>
+#include <pcl/kdtree/kdtree_flann.h>
+#include <pcl/common/transforms.h>
 
 #include <optimization_learning/so3_tool.hpp>
 
@@ -192,3 +195,92 @@ private:
   gtsam::Point3 source_point_;
   gtsam::Point3 target_point_;
 };
+
+// Gauss-Newton's method solve ICP.
+// https://github.com/zm0612/optimized_ICP/blob/be8651addd630c472418cf530a53623946906831/optimized_ICP_GN.cpp#L17
+template <typename PointT>
+bool MatchP2P(
+  const typename pcl::PointCloud<PointT>::Ptr& source_cloud_ptr,
+  const Eigen::Matrix4d& predict_pose,
+  const typename pcl::PointCloud<PointT>::Ptr& target_cloud_ptr,
+  Eigen::Affine3d& result_pose)
+{
+  bool has_converge_ = false;
+  int max_iterations_ = 30;
+  double max_correspond_distance_ = 0.5;
+  double transformation_epsilon_ = 1e-5;
+
+  typename pcl::PointCloud<PointT>::Ptr transformed_cloud(new pcl::PointCloud<PointT>);
+  typename pcl::KdTreeFLANN<PointT>::Ptr kdtree_flann_ptr_(new pcl::KdTreeFLANN<PointT>());
+  kdtree_flann_ptr_->setInputCloud(target_cloud_ptr);
+
+  Eigen::Matrix4d T = predict_pose;
+
+  // Gauss-Newton's method solve ICP.
+  unsigned int i = 0;
+  for (; i < max_iterations_; ++i) {
+    pcl::transformPointCloud(*source_cloud_ptr, *transformed_cloud, T);
+    Eigen::Matrix<double, 6, 6> Hessian = Eigen::Matrix<double, 6, 6>::Zero();
+    Eigen::Matrix<double, 6, 1> B = Eigen::Matrix<double, 6, 1>::Zero();
+
+    for (unsigned int j = 0; j < transformed_cloud->size(); ++j) {
+      const PointT& origin_point = source_cloud_ptr->points[j];
+
+      // 删除距离为无穷点
+      if (!pcl::isFinite(origin_point)) {
+        continue;
+      }
+
+      const PointT& transformed_point = transformed_cloud->at(j);
+      std::vector<float> resultant_distances;
+      std::vector<int> indices;
+      // 在目标点云中搜索距离当前点最近的一个点
+      kdtree_flann_ptr_->nearestKSearch(transformed_point, 1, indices, resultant_distances);
+
+      // 舍弃那些最近点,但是距离大于最大对应点对距离
+      if (resultant_distances.front() > max_correspond_distance_) {
+        continue;
+      }
+
+      Eigen::Vector3d nearest_point = Eigen::Vector3d(
+        target_cloud_ptr->at(indices.front()).x,
+        target_cloud_ptr->at(indices.front()).y,
+        target_cloud_ptr->at(indices.front()).z);
+
+      Eigen::Vector3d point_eigen(transformed_point.x, transformed_point.y, transformed_point.z);
+      Eigen::Vector3d origin_point_eigen(origin_point.x, origin_point.y, origin_point.z);
+      Eigen::Vector3d error = point_eigen - nearest_point;
+
+      Eigen::Matrix<double, 3, 6> Jacobian = Eigen::Matrix<double, 3, 6>::Zero();
+      // 构建雅克比矩阵
+      Jacobian.leftCols(3) = Eigen::Matrix3d::Identity();
+      Jacobian.rightCols(3) = -T.block<3, 3>(0, 0) * Hat(origin_point_eigen);
+
+      // 构建海森矩阵
+      Hessian += Jacobian.transpose() * Jacobian;
+      B += -Jacobian.transpose() * error;
+    }
+
+    if (Hessian.determinant() == 0) {
+      continue;
+    }
+
+    Eigen::Matrix<double, 6, 1> delta_x = Hessian.inverse() * B;
+
+    T.block<3, 1>(0, 3) = T.block<3, 1>(0, 3) + delta_x.head(3);
+    T.block<3, 3>(0, 0) *= Exp(delta_x.tail(3)).matrix();
+
+    if (delta_x.norm() < transformation_epsilon_) {
+      has_converge_ = true;
+      break;
+    }
+
+    // debug
+    // LOG(INFO) << "i= " << i << "  norm delta x= " << delta_x.norm();
+  }
+  LOG(INFO) << "iterations: " << i;
+
+  result_pose = T;
+
+  return true;
+}
