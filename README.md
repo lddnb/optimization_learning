@@ -13,5 +13,9 @@ Dependencies
 Todo list
 - [x]  create dev container
 - [x]  Migrate to ROS2 jazzy
-- [ ]  Add point-to-plane ICP
-- [ ]  Add GICP
+- [x]  Add point-to-plane ICP
+- [ ]  Add GICP 
+
+Question
+1. issue #1
+2. NICP Epsilon
