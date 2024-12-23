@@ -2,26 +2,13 @@
  * @ Author: lddnb
  * @ Create Time: 2024-12-13 14:47:47
  * @ Modified by: lddnb
- * @ Modified time: 2024-12-19 18:25:34
+ * @ Modified time: 2024-12-23 18:03:30
  * @ Description:
  */
 
 #pragma once
 
-#include <Eigen/Eigen>
-#include <ceres/ceres.h>
-#include <gtsam/geometry/Rot3.h>
-#include <gtsam/geometry/Pose3.h>
-#include <gtsam/inference/Symbol.h>
-#include <gtsam/nonlinear/NonlinearFactorGraph.h>
-#include <gtsam/nonlinear/Values.h>
-#include <gtsam/nonlinear/GaussNewtonOptimizer.h>
-#include <pcl/point_types.h>
-#include <pcl/point_cloud.h>
-#include <pcl/kdtree/kdtree_flann.h>
-#include <pcl/common/transforms.h>
-
-#include <optimization_learning/so3_tool.hpp>
+#include "common.hpp"
 
 class CeresCostFunctor
 {
@@ -283,4 +270,70 @@ bool MatchP2P(
   result_pose = T;
 
   return true;
+}
+
+// small_gicp ICP
+template <typename PointT>
+void ICP_small_gicp(
+  const typename pcl::PointCloud<PointT>::Ptr& source_cloud_ptr,
+  const typename pcl::PointCloud<PointT>::Ptr& target_cloud_ptr,
+  Eigen::Affine3d& result_pose,
+  int& num_iterations)
+{
+  double voxel_resolution = 1.0;             ///< Voxel resolution for VGICP
+  double downsampling_resolution = 0.25;     ///< Downsample resolution (this will be used only in the Eigen-based interface)
+  double max_correspondence_distance = 1.0;  ///< Maximum correspondence distance
+  double rotation_eps = 0.1 * M_PI / 180.0;  ///< Rotation tolerance for convergence check [rad]
+  double translation_eps = 1e-3;             ///< Translation tolerance for convergence check
+  int num_threads = 4;                       ///< Number of threads
+  int max_iterations = 20;                   ///< Maximum number of iterations
+  bool verbose = false;                      ///< Verbose mode
+
+  int num_neighbors = 10;
+
+  std::vector<Eigen::Vector3d> source_eigen(source_cloud_ptr->size());
+  std::vector<Eigen::Vector3d> target_eigen(target_cloud_ptr->size());
+  std::transform(
+    std::execution::par,
+    source_cloud_ptr->begin(),
+    source_cloud_ptr->end(),
+    source_eigen.begin(),
+    [](const pcl::PointXYZI& point) { return Eigen::Vector3d(point.x, point.y, point.z); });
+  std::transform(
+    std::execution::par,
+    target_cloud_ptr->begin(),
+    target_cloud_ptr->end(),
+    target_eigen.begin(),
+    [](const pcl::PointXYZI& point) { return Eigen::Vector3d(point.x, point.y, point.z); });
+
+  auto target = std::make_shared<small_gicp::PointCloud>(target_eigen);
+  auto source = std::make_shared<small_gicp::PointCloud>(source_eigen);
+
+  // Create KdTree
+  auto target_tree = std::make_shared<small_gicp::KdTree<small_gicp::PointCloud>>(
+    target,
+    small_gicp::KdTreeBuilderOMP(num_threads));
+  auto source_tree = std::make_shared<small_gicp::KdTree<small_gicp::PointCloud>>(
+    source,
+    small_gicp::KdTreeBuilderOMP(num_threads));
+
+  // Estimate point covariances
+  estimate_covariances_omp(*target, *target_tree, num_neighbors, num_threads);
+  estimate_covariances_omp(*source, *source_tree, num_neighbors, num_threads);
+
+  // GICP + OMP-based parallel reduction
+  small_gicp::Registration<small_gicp::ICPFactor, small_gicp::ParallelReductionOMP> registration;
+  registration.reduction.num_threads = num_threads;
+  registration.rejector.max_dist_sq = max_correspondence_distance * max_correspondence_distance;
+  registration.criteria.rotation_eps = rotation_eps;
+  registration.criteria.translation_eps = translation_eps;
+  registration.optimizer.max_iterations = max_iterations;
+  registration.optimizer.verbose = verbose;
+
+  // Align point clouds
+  Eigen::Isometry3d init_T_target_source(result_pose.matrix());
+  auto result = registration.align(*target, *source, *target_tree, init_T_target_source);
+
+  result_pose = result.T_target_source;
+  num_iterations = result.iterations;
 }

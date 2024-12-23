@@ -19,6 +19,8 @@ find_package(Ceres REQUIRED)
 
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
+
+add_subdirectory(thirdparty/small_gicp)
 ###########
 ## Build ##
 ###########
@@ -27,6 +29,7 @@ find_package(rclcpp REQUIRED)
 ## Your package locations should be listed before other locations
 include_directories(
   include
+  thirdparty/small_gicp/include
   ${GTSAM_INCLUDE_DIR}
   ${PCL_INCLUDE_DIRS}
 )
@@ -64,6 +67,7 @@ ament_target_dependencies(pcd_icp
   rclcpp
 )
 target_link_libraries(pcd_icp
+  small_gicp
   ${PCL_LIBRARIES}
   Ceres::ceres
   glog::glog

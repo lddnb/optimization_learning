@@ -2,7 +2,7 @@
  * @ Author: lddnb
  * @ Create Time: 2024-12-19 10:42:55
  * @ Modified by: lddnb
- * @ Modified time: 2024-12-20 10:40:58
+ * @ Modified time: 2024-12-23 18:51:40
  * @ Description:
  */
 
@@ -18,6 +18,10 @@
 #include <pcl/features/normal_3d_omp.h>
 #include <pcl/registration/icp.h>
 #include <pcl/visualization/pcl_visualizer.h>
+#include <small_gicp/pcl/pcl_registration.hpp>
+#include <small_gicp/registration/registration_helper.hpp>
+#include "small_gicp/factors/icp_factor.hpp"
+#include "small_gicp/factors/plane_icp_factor.hpp"
 
 #include "optimization_learning/icp.hpp"
 #include "optimization_learning/point_to_plane_icp.hpp"
@@ -296,8 +300,24 @@ int main(int argc, char** argv)
   LOG(INFO) << "R_opt: " << Eigen::Quaternionf(T_icp.rotation()).coeffs().transpose();
   LOG(INFO) << "t_opt: " << T_icp.translation().transpose();
 
+  LOG(INFO) << "------------------- small_gicp icp ------------------";
+  start = std::chrono::high_resolution_clock::now();
+
+  T_opt = T_init;
+  ICP_small_gicp<pcl::PointXYZI>(source_points, target_points, T_opt, iterations);
+
+  end = std::chrono::high_resolution_clock::now();
+  duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+  LOG(INFO) << "Time elapsed: " << duration << " us";
+
+  LOG(INFO) << "iterations: " << iterations;
+  LOG(INFO) << "R_opt: " << Eigen::Quaterniond(T_opt.rotation()).coeffs().transpose();
+  LOG(INFO) << "t_opt: " << T_opt.translation().transpose();
 
   LOG(INFO) << "======================== Point to Plane ICP ========================";
+  PointToPlaneICPConfig config;
+
+
   LOG(INFO) << "------------------- Ceres ------------------";
   T = {R_init.x(), R_init.y(), R_init.z(), R_init.w(), t_init.x(), t_init.y(), t_init.z()};
 
@@ -423,109 +443,53 @@ int main(int argc, char** argv)
 
   LOG(INFO) << "------------------- GTSAM SO3+R3 ------------------";
   start = std::chrono::high_resolution_clock::now();
-  last_R_gtsam = gtsam::Rot3(R_init);
-  last_t_gtsam = gtsam::Point3(t_init);
-  for (iterations = 0; iterations < 50; ++iterations) {
-    Eigen::Affine3d T_opt(Eigen::Translation3d(last_t_gtsam) * last_R_gtsam.matrix());
-    pcl::transformPointCloud(*source_points, *source_points_transformed, T_opt);
-
-    gtsam::NonlinearFactorGraph graph;
-    for (int i = 0; i < source_points->size(); ++i) {
-      std::vector<int> nn_indices(1);
-      std::vector<float> nn_distances(1);
-      kdtree.nearestKSearch(source_points_transformed->at(i), 5, nn_indices, nn_distances);
-
-      std::vector<Eigen::Vector3d> plane_points;
-      for (size_t i = 0; i < 5; ++i) {
-        plane_points.emplace_back(
-          target_points->at(nn_indices[i]).x,
-          target_points->at(nn_indices[i]).y,
-          target_points->at(nn_indices[i]).z);
-      }
-      Eigen::Matrix<double, 4, 1> plane_coeffs;
-       if (nn_distances[0] > 1 || !FitPlane(plane_points, plane_coeffs)) {
-        continue;
-      }
-      graph.emplace_shared<GtsamIcpFactorP2Plane2>(key, key2, source_points->at(i), target_points->at(nn_indices[0]), plane_coeffs.head<3>(), noise_model2);
-    }
-
-    gtsam::Values initial_estimate;
-    initial_estimate.insert(key, last_R_gtsam);
-    initial_estimate.insert(key2, last_t_gtsam);
-    gtsam::GaussNewtonOptimizer optimizer(graph, initial_estimate, params_gn2);
-
-    optimizer.optimize();
-
-    result = optimizer.values();
-    gtsam::Rot3 R_result = result.at<gtsam::Rot3>(key);
-    gtsam::Point3 t_result = result.at<gtsam::Point3>(key2);
-
-    if (
-      (R_result.toQuaternion().coeffs() - last_R_gtsam.toQuaternion().coeffs()).norm() < 1e-3 &&
-      (t_result - last_t_gtsam).norm() < 1e-3) {
-      break;
-    }
-    last_R_gtsam = R_result;
-    last_t_gtsam = t_result;
-  }
-
-  end = std::chrono::high_resolution_clock::now();
-  duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
-  LOG(INFO) << "GTSAM SO3+R3 solve time: " << duration << " us";
-
-  R_result = result.at<gtsam::Rot3>(key);
-  t_result = result.at<gtsam::Point3>(key2);
-  LOG(INFO) << "iterations: " << iterations;
-  LOG(INFO) << "R: " << R_result.toQuaternion();
-  LOG(INFO) << "t: " << t_result.transpose();
-
-  LOG(INFO) << "------------------- GN ------------------";
-  start = std::chrono::high_resolution_clock::now();
   T_opt = T_init;
-  MatchP2Plane<pcl::PointXYZI>(source_points, T_init.matrix(), target_points, T_opt);
+  P2PlaneICP_GTSAM_SO3_R3<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config);
   end = std::chrono::high_resolution_clock::now();
   duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
   LOG(INFO) << "Time elapsed: " << duration << " us";
 
+  LOG(INFO) << "iterations: " << iterations;
+  LOG(INFO) << "R_opt: " << Eigen::Quaterniond(T_opt.rotation()).coeffs().transpose();
+  LOG(INFO) << "t_opt: " << T_opt.translation().transpose();
+
+  LOG(INFO) << "------------------- GN ------------------";
+  start = std::chrono::high_resolution_clock::now();
+  T_opt = T_init;
+  P2PlaneICP_GN<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config);
+  end = std::chrono::high_resolution_clock::now();
+  duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+  LOG(INFO) << "Time elapsed: " << duration << " us";
+
+  LOG(INFO) << "iterations: " << iterations;
   LOG(INFO) << "R_opt: " << Eigen::Quaterniond(T_opt.rotation()).coeffs().transpose();
   LOG(INFO) << "t_opt: " << T_opt.translation().transpose();
 
   LOG(INFO) << "------------------- PCL NICP ------------------";
   start = std::chrono::high_resolution_clock::now();
-  pcl::PointCloud<pcl::PointXYZINormal>::Ptr source_cloud_with_normal(new pcl::PointCloud<pcl::PointXYZINormal>);
-  pcl::PointCloud<pcl::PointXYZINormal>::Ptr target_cloud_with_normal(new pcl::PointCloud<pcl::PointXYZINormal>);
-  pcl::NormalEstimationOMP<pcl::PointXYZI, pcl::Normal> norm_est;
-  pcl::PointCloud<pcl::Normal>::Ptr normals(new pcl::PointCloud<pcl::Normal>);
-  pcl::search::KdTree<pcl::PointXYZI>::Ptr tree(new pcl::search::KdTree<pcl::PointXYZI>());
-  norm_est.setKSearch(10);
-  norm_est.setNumberOfThreads(10);
-  norm_est.setSearchMethod(tree);
-  norm_est.setInputCloud(source_points);
-  norm_est.compute(*normals);
-  pcl::concatenateFields(*source_points, *normals, *source_cloud_with_normal);
-
-  norm_est.setInputCloud(target_points);
-  norm_est.compute(*normals);
-  pcl::concatenateFields(*target_points, *normals, *target_cloud_with_normal);
-
-  pcl::IterativeClosestPointWithNormals<pcl::PointXYZINormal, pcl::PointXYZINormal> nicp;
-  nicp.setInputSource(source_cloud_with_normal);
-  nicp.setInputTarget(target_cloud_with_normal);
-  nicp.setMaxCorrespondenceDistance(0.5);
-  nicp.setTransformationEpsilon(1e-5);
-  nicp.setEuclideanFitnessEpsilon(1e-5);
-  nicp.setMaximumIterations(30);
-
-  pcl::PointCloud<pcl::PointXYZINormal>::Ptr aligned2(new pcl::PointCloud<pcl::PointXYZINormal>);
-  nicp.align(*aligned2, T_init.matrix().cast<float>());
+  T_opt = T_init;
+  P2PlaneICP_PCL<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config);
   end = std::chrono::high_resolution_clock::now();
   duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
   LOG(INFO) << "Time elapsed: " << duration << " us";
 
-  T_icp = nicp.getFinalTransformation();
-  LOG(INFO) << "iterations: " << nicp.nr_iterations_;
-  LOG(INFO) << "R_opt: " << Eigen::Quaternionf(T_icp.rotation()).coeffs().transpose();
-  LOG(INFO) << "t_opt: " << T_icp.translation().transpose();
+  LOG(INFO) << "iterations: " << iterations;
+  LOG(INFO) << "R_opt: " << Eigen::Quaterniond(T_opt.rotation()).coeffs().transpose();
+  LOG(INFO) << "t_opt: " << T_opt.translation().transpose();
+
+  LOG(INFO) << "------------------- small_gicp  point to plane icp ------------------";
+  start = std::chrono::high_resolution_clock::now();
+  config.rotation_eps = 0.1 * M_PI / 180.0;
+  T_opt = T_init;
+  P2PlaneICP_small_gicp<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config);
+
+  end = std::chrono::high_resolution_clock::now();
+  duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+  LOG(INFO) << "Time elapsed: " << duration << " us";
+
+  LOG(INFO) << "iterations: " << iterations;
+  LOG(INFO) << "R_opt: " << Eigen::Quaterniond(T_opt.rotation()).coeffs().transpose();
+  LOG(INFO) << "t_opt: " << T_opt.translation().transpose();
 
   LOG(INFO) << "======================== Generalized ICP ========================";
   return 0;

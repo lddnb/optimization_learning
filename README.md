@@ -19,3 +19,9 @@ Todo list
 Question
 1. issue #1
 2. NICP Epsilon
+
+
+Acknowledgments
+- [slam_in_autonomous_driving](https://github.com/gaoxiang12/slam_in_autonomous_driving)
+- [optimized_ICP](https://github.com/zm0612/optimized_ICP)
+- [small_gicp](https://github.com/koide3/small_gicp)
