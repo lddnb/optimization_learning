@@ -48,6 +48,7 @@ RUN apt-get update && \
     libc++-dev \
     libpoco-dev \
     lsb-release \
+    net-tools \
     tar \
     zip \
     unzip \
