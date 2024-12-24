@@ -62,19 +62,7 @@ target_link_libraries(icp
   gtsam
 )
 
-add_executable(pcd_icp src/pcd_icp.cpp)
-ament_target_dependencies(pcd_icp
-  rclcpp
-)
-target_link_libraries(pcd_icp
-  small_gicp
-  ${PCL_LIBRARIES}
-  Ceres::ceres
-  glog::glog
-  gtsam
-)
-
-install(TARGETS R_mean icp pcd_icp
+install(TARGETS R_mean icp
   DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -89,6 +77,17 @@ if (BUILD_TESTING)
     Ceres::ceres
     glog::glog
     gtsam
+  )
+  ament_add_gtest(test_icp test/test_icp.cpp)
+  ament_target_dependencies(test_icp
+    rclcpp
+  )
+  target_link_libraries(test_icp
+    ${PCL_LIBRARIES}
+    Ceres::ceres
+    glog::glog
+    gtsam
+    small_gicp
   )
 endif()
 

@@ -2,13 +2,24 @@
  * @ Author: lddnb
  * @ Create Time: 2024-12-13 14:47:47
  * @ Modified by: lddnb
- * @ Modified time: 2024-12-23 18:03:30
+ * @ Modified time: 2024-12-24 18:39:50
  * @ Description:
  */
 
 #pragma once
 
 #include "common.hpp"
+
+struct ICPConfig
+{
+double downsampling_resolution = 0.25;
+double max_correspondence_distance = 1.0;
+double rotation_eps = 1e-3;  // 0.1 * M_PI / 180.0
+double translation_eps = 1e-3;
+int num_threads = 4;
+int max_iterations = 30;
+bool verbose = false;
+};
 
 class CeresCostFunctor
 {
@@ -184,92 +195,367 @@ private:
 };
 
 // Gauss-Newton's method solve ICP.
-// https://github.com/zm0612/optimized_ICP/blob/be8651addd630c472418cf530a53623946906831/optimized_ICP_GN.cpp#L17
 template <typename PointT>
-bool MatchP2P(
+void P2PICP_GN(
   const typename pcl::PointCloud<PointT>::Ptr& source_cloud_ptr,
-  const Eigen::Matrix4d& predict_pose,
   const typename pcl::PointCloud<PointT>::Ptr& target_cloud_ptr,
-  Eigen::Affine3d& result_pose)
+  Eigen::Affine3d& result_pose,
+  int& num_iterations,
+  const ICPConfig& config)
 {
-  bool has_converge_ = false;
-  int max_iterations_ = 30;
-  double max_correspond_distance_ = 0.5;
-  double transformation_epsilon_ = 1e-5;
+  typename pcl::PointCloud<PointT>::Ptr source_points_transformed(new pcl::PointCloud<PointT>);
+  pcl::KdTreeFLANN<PointT> kdtree;
+  kdtree.setInputCloud(target_cloud_ptr);
 
-  typename pcl::PointCloud<PointT>::Ptr transformed_cloud(new pcl::PointCloud<PointT>);
-  typename pcl::KdTreeFLANN<PointT>::Ptr kdtree_flann_ptr_(new pcl::KdTreeFLANN<PointT>());
-  kdtree_flann_ptr_->setInputCloud(target_cloud_ptr);
+  Eigen::Matrix4d last_T = result_pose.matrix();
 
-  Eigen::Matrix4d T = predict_pose;
+  int iterations = 0;
+  for (; iterations < config.max_iterations; ++iterations) {
+    pcl::transformPointCloud(*source_cloud_ptr, *source_points_transformed, last_T);
+    Eigen::Matrix<double, 6, 6> H = Eigen::Matrix<double, 6, 6>::Zero();
+    Eigen::Matrix<double, 6, 1> b = Eigen::Matrix<double, 6, 1>::Zero();
+    std::vector<Eigen::Matrix<double, 6, 6>> Hs(source_points_transformed->size(), Eigen::Matrix<double, 6, 6>::Zero());
+    std::vector<Eigen::Matrix<double, 6, 1>> bs(source_points_transformed->size(), Eigen::Matrix<double, 6, 1>::Zero());
 
-  // Gauss-Newton's method solve ICP.
-  unsigned int i = 0;
-  for (; i < max_iterations_; ++i) {
-    pcl::transformPointCloud(*source_cloud_ptr, *transformed_cloud, T);
-    Eigen::Matrix<double, 6, 6> Hessian = Eigen::Matrix<double, 6, 6>::Zero();
-    Eigen::Matrix<double, 6, 1> B = Eigen::Matrix<double, 6, 1>::Zero();
+    std::vector<int> index(source_points_transformed->size());
+    std::iota(index.begin(), index.end(), 0);
 
-    for (unsigned int j = 0; j < transformed_cloud->size(); ++j) {
-      const PointT& origin_point = source_cloud_ptr->points[j];
+    // 并行执行近邻搜索和构建H、b
+    std::for_each(
+      std::execution::par,
+      index.begin(),
+      index.end(),
+      [&](int idx) {
+        std::vector<int> nn_indices(1);
+        std::vector<float> nn_distances(1);
+        bool valid = kdtree.nearestKSearch(source_points_transformed->at(idx), 1, nn_indices, nn_distances) > 0;
+        
+        if (!valid || nn_distances[0] > config.max_correspondence_distance) {
+          return;
+        }
 
-      // 删除距离为无穷点
-      if (!pcl::isFinite(origin_point)) {
-        continue;
+        Eigen::Vector3d target_point = Eigen::Vector3d(
+          target_cloud_ptr->at(nn_indices.front()).x,
+          target_cloud_ptr->at(nn_indices.front()).y,
+          target_cloud_ptr->at(nn_indices.front()).z);
+
+        Eigen::Vector3d curr_point(source_points_transformed->at(idx).x, 
+                                 source_points_transformed->at(idx).y, 
+                                 source_points_transformed->at(idx).z);
+        Eigen::Vector3d source_point(source_cloud_ptr->at(idx).x, 
+                                   source_cloud_ptr->at(idx).y, 
+                                   source_cloud_ptr->at(idx).z);
+        Eigen::Vector3d error = curr_point - target_point;
+
+        Eigen::Matrix<double, 3, 6> Jacobian = Eigen::Matrix<double, 3, 6>::Zero();
+        Jacobian.leftCols(3) = Eigen::Matrix3d::Identity();
+        Jacobian.rightCols(3) = -last_T.block<3, 3>(0, 0) * Hat(source_point);
+
+        Hs[idx] = Jacobian.transpose() * Jacobian;
+        bs[idx] = -Jacobian.transpose() * error;
+      });
+
+    // 并行规约求和
+    using ResultType = std::pair<Eigen::Matrix<double, 6, 6>, Eigen::Matrix<double, 6, 1>>;
+    auto result = std::transform_reduce(
+      std::execution::par,
+      index.begin(),
+      index.end(),
+      ResultType(Eigen::Matrix<double, 6, 6>::Zero(), Eigen::Matrix<double, 6, 1>::Zero()),
+      // 规约操作
+      [](const auto& a, const auto& b) {
+        return std::make_pair(a.first + b.first, a.second + b.second);
+      },
+      // 转换操作
+      [&Hs, &bs](const int& idx) {
+        return ResultType(Hs[idx], bs[idx]);
       }
+    );
 
-      const PointT& transformed_point = transformed_cloud->at(j);
-      std::vector<float> resultant_distances;
-      std::vector<int> indices;
-      // 在目标点云中搜索距离当前点最近的一个点
-      kdtree_flann_ptr_->nearestKSearch(transformed_point, 1, indices, resultant_distances);
+    H = result.first;
+    b = result.second;
 
-      // 舍弃那些最近点,但是距离大于最大对应点对距离
-      if (resultant_distances.front() > max_correspond_distance_) {
-        continue;
-      }
-
-      Eigen::Vector3d nearest_point = Eigen::Vector3d(
-        target_cloud_ptr->at(indices.front()).x,
-        target_cloud_ptr->at(indices.front()).y,
-        target_cloud_ptr->at(indices.front()).z);
-
-      Eigen::Vector3d point_eigen(transformed_point.x, transformed_point.y, transformed_point.z);
-      Eigen::Vector3d origin_point_eigen(origin_point.x, origin_point.y, origin_point.z);
-      Eigen::Vector3d error = point_eigen - nearest_point;
-
-      Eigen::Matrix<double, 3, 6> Jacobian = Eigen::Matrix<double, 3, 6>::Zero();
-      // 构建雅克比矩阵
-      Jacobian.leftCols(3) = Eigen::Matrix3d::Identity();
-      Jacobian.rightCols(3) = -T.block<3, 3>(0, 0) * Hat(origin_point_eigen);
-
-      // 构建海森矩阵
-      Hessian += Jacobian.transpose() * Jacobian;
-      B += -Jacobian.transpose() * error;
-    }
-
-    if (Hessian.determinant() == 0) {
+    if (H.determinant() == 0) {
       continue;
     }
 
-    Eigen::Matrix<double, 6, 1> delta_x = Hessian.inverse() * B;
+    Eigen::Matrix<double, 6, 1> delta_x = H.inverse() * b;
 
-    T.block<3, 1>(0, 3) = T.block<3, 1>(0, 3) + delta_x.head(3);
-    T.block<3, 3>(0, 0) *= Exp(delta_x.tail(3)).matrix();
+    last_T.block<3, 1>(0, 3) = last_T.block<3, 1>(0, 3) + delta_x.head(3);
+    last_T.block<3, 3>(0, 0) *= Exp(delta_x.tail(3)).matrix();
 
-    if (delta_x.norm() < transformation_epsilon_) {
-      has_converge_ = true;
+    if (delta_x.norm() < config.translation_eps) {
       break;
     }
-
-    // debug
-    // LOG(INFO) << "i= " << i << "  norm delta x= " << delta_x.norm();
   }
-  LOG(INFO) << "iterations: " << i;
 
-  result_pose = T;
+  result_pose = last_T;
+  num_iterations = iterations;
+}
 
-  return true;
+template <typename PointT>
+void P2PICP_Ceres(
+  const typename pcl::PointCloud<PointT>::Ptr& source_cloud_ptr,
+  const typename pcl::PointCloud<PointT>::Ptr& target_cloud_ptr,
+  Eigen::Affine3d& result_pose,
+  int& num_iterations,
+  const ICPConfig& config)
+{
+  Eigen::Quaterniond last_R = Eigen::Quaterniond(result_pose.rotation());
+  Eigen::Vector3d last_t = result_pose.translation();
+  std::vector<double> T = {last_R.x(), last_R.y(), last_R.z(), last_R.w(), last_t.x(), last_t.y(), last_t.z()};
+
+  typename pcl::PointCloud<PointT>::Ptr source_points_transformed(new pcl::PointCloud<PointT>);
+  pcl::KdTreeFLANN<PointT> kdtree;
+  kdtree.setInputCloud(target_cloud_ptr);
+
+  int iterations = 0;
+  for (; iterations < config.max_iterations; ++iterations) {
+    Eigen::Affine3d T_opt(Eigen::Translation3d(last_t) * last_R.toRotationMatrix());
+    pcl::transformPointCloud(*source_cloud_ptr, *source_points_transformed, T_opt);
+
+    std::vector<CeresCostFunctor*> cost_functors(source_points_transformed->size(), nullptr);
+    std::vector<int> index(source_points_transformed->size());
+    std::iota(index.begin(), index.end(), 0);
+
+    // 并行执行近邻搜索和构建代价函数
+    std::for_each(
+      std::execution::par_unseq,
+      index.begin(),
+      index.end(),
+      [&](int idx) {
+        std::vector<int> nn_indices(1);
+        std::vector<float> nn_distances(1);
+        bool valid = kdtree.nearestKSearch(source_points_transformed->at(idx), 1, nn_indices, nn_distances) > 0;
+
+        if (!valid || nn_distances[0] > config.max_correspondence_distance) {
+          return;
+        }
+
+        cost_functors[idx] = new CeresCostFunctor(
+          source_cloud_ptr->at(idx),
+          target_cloud_ptr->at(nn_indices[0]));
+      });
+
+    ceres::Problem problem;
+    ceres::ProductManifold<ceres::EigenQuaternionManifold, ceres::EuclideanManifold<3>>* se3 =
+      new ceres::ProductManifold<ceres::EigenQuaternionManifold, ceres::EuclideanManifold<3>>;
+    problem.AddParameterBlock(T.data(), 7, se3);
+
+    for (const auto& cost_functor : cost_functors) {
+      if (cost_functor == nullptr) {
+        continue;
+      }
+      ceres::CostFunction* cost_function = new ceres::AutoDiffCostFunction<CeresCostFunctor, 3, 7>(cost_functor);
+      problem.AddResidualBlock(cost_function, nullptr, T.data());
+    }
+
+    ceres::Solver::Options options;
+    options.max_num_iterations = 1;
+    options.linear_solver_type = ceres::SPARSE_NORMAL_CHOLESKY;
+    options.num_threads = config.num_threads;
+    options.minimizer_progress_to_stdout = config.verbose;
+    ceres::Solver::Summary summary;
+    ceres::Solve(options, &problem, &summary);
+
+    Eigen::Map<Eigen::Quaterniond> R(T.data());
+    Eigen::Map<Eigen::Vector3d> t(T.data() + 4);
+
+    if ((R.coeffs() - last_R.coeffs()).norm() < config.rotation_eps && 
+        (t - last_t).norm() < config.translation_eps) {
+      break;
+    }
+    last_R = R;
+    last_t = t;
+  }
+
+  result_pose = Eigen::Affine3d(Eigen::Translation3d(last_t) * last_R.toRotationMatrix());
+  num_iterations = iterations;
+}
+
+template <typename PointT>
+void P2PICP_GTSAM_SE3(
+  const typename pcl::PointCloud<PointT>::Ptr& source_cloud_ptr,
+  const typename pcl::PointCloud<PointT>::Ptr& target_cloud_ptr,
+  Eigen::Affine3d& result_pose,
+  int& num_iterations,
+  const ICPConfig& config)
+{
+  gtsam::Pose3 last_T_gtsam = gtsam::Pose3(gtsam::Rot3(result_pose.rotation()), gtsam::Point3(result_pose.translation()));
+  typename pcl::PointCloud<PointT>::Ptr source_points_transformed(new pcl::PointCloud<PointT>);
+  pcl::KdTreeFLANN<PointT> kdtree;
+  kdtree.setInputCloud(target_cloud_ptr);
+  const gtsam::Key key = gtsam::symbol_shorthand::X(0);
+  gtsam::SharedNoiseModel noise_model = gtsam::noiseModel::Isotropic::Sigma(3, 1);
+  gtsam::GaussNewtonParams params_gn;
+  if (config.verbose) {
+    params_gn.setVerbosity("ERROR");
+  }
+  params_gn.maxIterations = 1;
+  params_gn.relativeErrorTol = config.translation_eps;
+
+  int iterations = 0;
+  for (; iterations < config.max_iterations; ++iterations) {
+    Eigen::Affine3d T_opt(last_T_gtsam.matrix());
+    pcl::transformPointCloud(*source_cloud_ptr, *source_points_transformed, T_opt);
+
+    std::vector<GtsamIcpFactor*> cost_functors(source_points_transformed->size(), nullptr);
+    std::vector<int> index(source_points_transformed->size());
+    std::iota(index.begin(), index.end(), 0);
+
+    // 并行执行近邻搜索和构建因子
+    std::for_each(
+      std::execution::par,
+      index.begin(),
+      index.end(),
+      [&](int idx) {
+        std::vector<int> nn_indices(1);
+        std::vector<float> nn_distances(1);
+        bool valid = kdtree.nearestKSearch(source_points_transformed->at(idx), 1, nn_indices, nn_distances) > 0;
+        
+        if (!valid || nn_distances[0] > config.max_correspondence_distance) {
+          return;
+        }
+
+        cost_functors[idx] = new GtsamIcpFactor(
+          key, 
+          source_cloud_ptr->at(idx), 
+          target_cloud_ptr->at(nn_indices[0]), 
+          noise_model);
+      });
+
+    gtsam::NonlinearFactorGraph graph;
+    for (const auto& cost_functor : cost_functors) {
+      if (cost_functor == nullptr) {
+        continue;
+      }
+      graph.add(*cost_functor);
+    }
+
+    gtsam::Values initial_estimate;
+    initial_estimate.insert(key, last_T_gtsam);
+    gtsam::GaussNewtonOptimizer optimizer(graph, initial_estimate, params_gn);
+    optimizer.optimize();
+
+    auto result = optimizer.values();
+    gtsam::Pose3 T_result = result.at<gtsam::Pose3>(key);
+
+    if ((last_T_gtsam.rotation().toQuaternion().coeffs() - T_result.rotation().toQuaternion().coeffs()).norm() < config.rotation_eps &&
+        (last_T_gtsam.translation() - T_result.translation()).norm() < config.translation_eps) {
+      break;
+    }
+    last_T_gtsam = T_result;
+  }
+
+  result_pose = Eigen::Affine3d(last_T_gtsam.matrix());
+  num_iterations = iterations;
+}
+
+template <typename PointT>
+void P2PICP_GTSAM_SO3_R3(
+  const typename pcl::PointCloud<PointT>::Ptr& source_cloud_ptr,
+  const typename pcl::PointCloud<PointT>::Ptr& target_cloud_ptr,
+  Eigen::Affine3d& result_pose,
+  int& num_iterations,
+  const ICPConfig& config)
+{
+  gtsam::Rot3 last_R_gtsam = gtsam::Rot3(result_pose.rotation());
+  gtsam::Point3 last_t_gtsam = gtsam::Point3(result_pose.translation());
+  typename pcl::PointCloud<PointT>::Ptr source_points_transformed(new pcl::PointCloud<PointT>);
+  pcl::KdTreeFLANN<PointT> kdtree;
+  kdtree.setInputCloud(target_cloud_ptr);
+  const gtsam::Key key = gtsam::symbol_shorthand::X(0);
+  const gtsam::Key key2 = gtsam::symbol_shorthand::X(1);
+  gtsam::SharedNoiseModel noise_model = gtsam::noiseModel::Isotropic::Sigma(3, 1);
+  gtsam::GaussNewtonParams params_gn;
+  if (config.verbose) {
+    params_gn.setVerbosity("ERROR");
+  }
+  params_gn.maxIterations = 1;
+  params_gn.relativeErrorTol = config.translation_eps;
+
+  int iterations = 0;
+  for (; iterations < config.max_iterations; ++iterations) {
+    Eigen::Affine3d T_opt(Eigen::Translation3d(last_t_gtsam) * last_R_gtsam.matrix());
+    pcl::transformPointCloud(*source_cloud_ptr, *source_points_transformed, T_opt);
+
+    std::vector<GtsamIcpFactor2*> cost_functors(source_points_transformed->size(), nullptr);
+    std::vector<int> index(source_points_transformed->size());
+    std::iota(index.begin(), index.end(), 0);
+
+    // 并行执行近邻搜索和构建因子
+    std::for_each(
+      std::execution::par,
+      index.begin(),
+      index.end(),
+      [&](int idx) {
+        std::vector<int> nn_indices(1);
+        std::vector<float> nn_distances(1);
+        bool valid = kdtree.nearestKSearch(source_points_transformed->at(idx), 1, nn_indices, nn_distances) > 0;
+        
+        if (!valid || nn_distances[0] > config.max_correspondence_distance) {
+          return;
+        }
+
+        cost_functors[idx] = new GtsamIcpFactor2(
+          key,
+          key2,
+          source_cloud_ptr->at(idx),
+          target_cloud_ptr->at(nn_indices[0]),
+          noise_model);
+      });
+
+    gtsam::NonlinearFactorGraph graph;
+    for (const auto& cost_functor : cost_functors) {
+      if (cost_functor == nullptr) {
+        continue;
+      }
+      graph.add(*cost_functor);
+    }
+
+    gtsam::Values initial_estimate;
+    initial_estimate.insert(key, last_R_gtsam);
+    initial_estimate.insert(key2, last_t_gtsam);
+    gtsam::GaussNewtonOptimizer optimizer(graph, initial_estimate, params_gn);
+    optimizer.optimize();
+
+    auto result = optimizer.values();
+    gtsam::Rot3 R_result = result.at<gtsam::Rot3>(key);
+    gtsam::Point3 t_result = result.at<gtsam::Point3>(key2);
+
+    if ((R_result.toQuaternion().coeffs() - last_R_gtsam.toQuaternion().coeffs()).norm() < config.rotation_eps &&
+        (t_result - last_t_gtsam).norm() < config.translation_eps) {
+      break;
+    }
+    last_R_gtsam = R_result;
+    last_t_gtsam = t_result;
+  }
+
+  result_pose = Eigen::Affine3d(Eigen::Translation3d(last_t_gtsam) * last_R_gtsam.matrix());
+  num_iterations = iterations;
+}
+
+template <typename PointT>
+void P2PICP_PCL(
+  const typename pcl::PointCloud<PointT>::Ptr& source_cloud_ptr,
+  const typename pcl::PointCloud<PointT>::Ptr& target_cloud_ptr,
+  Eigen::Affine3d& result_pose,
+  int& num_iterations,
+  const ICPConfig& config)
+{
+  pcl::IterativeClosestPoint<PointT, PointT> icp;
+  icp.setInputSource(source_cloud_ptr);
+  icp.setInputTarget(target_cloud_ptr);
+  icp.setMaxCorrespondenceDistance(config.max_correspondence_distance);
+  icp.setTransformationEpsilon(config.translation_eps);
+  icp.setEuclideanFitnessEpsilon(config.translation_eps);
+  icp.setMaximumIterations(config.max_iterations);
+
+  typename pcl::PointCloud<PointT>::Ptr aligned(new pcl::PointCloud<PointT>);
+  icp.align(*aligned, result_pose.matrix().cast<float>());
+
+  result_pose = Eigen::Affine3d(icp.getFinalTransformation().template cast<double>());
+  num_iterations = icp.nr_iterations_;
 }
 
 // small_gicp ICP
@@ -278,19 +564,9 @@ void ICP_small_gicp(
   const typename pcl::PointCloud<PointT>::Ptr& source_cloud_ptr,
   const typename pcl::PointCloud<PointT>::Ptr& target_cloud_ptr,
   Eigen::Affine3d& result_pose,
-  int& num_iterations)
+  int& num_iterations,
+  const ICPConfig& config)
 {
-  double voxel_resolution = 1.0;             ///< Voxel resolution for VGICP
-  double downsampling_resolution = 0.25;     ///< Downsample resolution (this will be used only in the Eigen-based interface)
-  double max_correspondence_distance = 1.0;  ///< Maximum correspondence distance
-  double rotation_eps = 0.1 * M_PI / 180.0;  ///< Rotation tolerance for convergence check [rad]
-  double translation_eps = 1e-3;             ///< Translation tolerance for convergence check
-  int num_threads = 4;                       ///< Number of threads
-  int max_iterations = 20;                   ///< Maximum number of iterations
-  bool verbose = false;                      ///< Verbose mode
-
-  int num_neighbors = 10;
-
   std::vector<Eigen::Vector3d> source_eigen(source_cloud_ptr->size());
   std::vector<Eigen::Vector3d> target_eigen(target_cloud_ptr->size());
   std::transform(
@@ -312,23 +588,16 @@ void ICP_small_gicp(
   // Create KdTree
   auto target_tree = std::make_shared<small_gicp::KdTree<small_gicp::PointCloud>>(
     target,
-    small_gicp::KdTreeBuilderOMP(num_threads));
-  auto source_tree = std::make_shared<small_gicp::KdTree<small_gicp::PointCloud>>(
-    source,
-    small_gicp::KdTreeBuilderOMP(num_threads));
-
-  // Estimate point covariances
-  estimate_covariances_omp(*target, *target_tree, num_neighbors, num_threads);
-  estimate_covariances_omp(*source, *source_tree, num_neighbors, num_threads);
+    small_gicp::KdTreeBuilderOMP(config.num_threads));
 
   // GICP + OMP-based parallel reduction
   small_gicp::Registration<small_gicp::ICPFactor, small_gicp::ParallelReductionOMP> registration;
-  registration.reduction.num_threads = num_threads;
-  registration.rejector.max_dist_sq = max_correspondence_distance * max_correspondence_distance;
-  registration.criteria.rotation_eps = rotation_eps;
-  registration.criteria.translation_eps = translation_eps;
-  registration.optimizer.max_iterations = max_iterations;
-  registration.optimizer.verbose = verbose;
+  registration.reduction.num_threads = config.num_threads;
+  registration.rejector.max_dist_sq = config.max_correspondence_distance * config.max_correspondence_distance;
+  registration.criteria.rotation_eps = config.rotation_eps;
+  registration.criteria.translation_eps = config.translation_eps;
+  registration.optimizer.max_iterations = config.max_iterations;
+  registration.optimizer.verbose = config.verbose;
 
   // Align point clouds
   Eigen::Isometry3d init_T_target_source(result_pose.matrix());
