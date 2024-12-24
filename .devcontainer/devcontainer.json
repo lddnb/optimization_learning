@@ -40,7 +40,7 @@
       }
     }
   },
-  // ========== Comment out on Windows ===========
+  // ========== Ubuntu ===========
   "containerEnv": {
     "DBUS_SYSTEM_BUS_ADDRESS": "unix:path=/host/run/dbus/system_bus_socket"
   },
@@ -50,7 +50,11 @@
     "source=${localEnv:HOME}/.gitconfig,target=/home/ubuntu/.gitconfig,type=bind,consistency=cached",
     "source=${localEnv:HOME}/.ssh,target=/home/ubuntu/.ssh,type=bind,consistency=cached"
   ],
-  // ============================================
+  // ========== Windows ===========
+  // "mounts": [
+  //   "source=${localEnv:HOME}${localEnv:USERPROFILE}/.ssh,target=/home/ubuntu/.ssh,type=bind"
+  // ],
+  // ==============================
   "workspaceMount": "source=${localWorkspaceFolder},target=/home/ubuntu/ros_ws/src/${localWorkspaceFolderBasename},type=bind",
   "workspaceFolder": "/home/ubuntu/ros_ws"
 }
