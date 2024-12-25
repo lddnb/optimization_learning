@@ -25,3 +25,4 @@ Acknowledgments
 - [slam_in_autonomous_driving](https://github.com/gaoxiang12/slam_in_autonomous_driving)
 - [optimized_ICP](https://github.com/zm0612/optimized_ICP)
 - [small_gicp](https://github.com/koide3/small_gicp)
+- [ndt_omp](https://github.com/koide3/ndt_omp)

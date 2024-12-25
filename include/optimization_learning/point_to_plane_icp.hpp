@@ -2,7 +2,7 @@
  * @ Author: lddnb
  * @ Create Time: 2024-12-19 15:04:38
  * @ Modified by: lddnb
- * @ Modified time: 2024-12-24 18:56:06
+ * @ Modified time: 2024-12-25 17:15:53
  * @ Description:
  */
 
@@ -10,6 +10,14 @@
 
 #include "common.hpp"
 
+#include <small_gicp/ann/kdtree_omp.hpp>
+#include <small_gicp/points/point_cloud.hpp>
+#include <small_gicp/util/normal_estimation_omp.hpp>
+#include <small_gicp/registration/reduction_omp.hpp>
+#include <small_gicp/registration/registration.hpp>
+#include "small_gicp/factors/plane_icp_factor.hpp"
+#include <small_gicp/factors/gicp_factor.hpp>
+#include <small_gicp/registration/registration_helper.hpp>
 struct PointToPlaneICPConfig
 {
 double downsampling_resolution = 0.25;
@@ -566,19 +574,18 @@ void P2PlaneICP_GN(
         bs[idx] = -Jacobian.transpose() * error;
       });
 
-    using ResultType = std::pair<Eigen::Matrix<double, 6, 6>, Eigen::Matrix<double, 6, 1>>;
     // 方案1：使用普通的 std::accumulate (串行执行)
     // auto result = std::accumulate(
     //   index.begin(),
     //   index.end(),
-    //   ResultType(Eigen::Matrix<double, 6, 6>::Zero(), Eigen::Matrix<double, 6, 1>::Zero()),
-    //   [&](const ResultType& prev, int idx) -> ResultType {
+    //   H_b_type(Eigen::Matrix<double, 6, 6>::Zero(), Eigen::Matrix<double, 6, 1>::Zero()),
+    //   [&](const H_b_type& prev, int idx) -> H_b_type {
     //     const auto& J = Jacobians[idx];
     //     const double& e = errors[idx];
     //     if (e == 0.0) {
     //       return prev;
     //     }
-    //     return ResultType(
+    //     return H_b_type(
     //       prev.first + J.transpose() * J,
     //       prev.second - J.transpose() * e);
     //   });
@@ -588,14 +595,14 @@ void P2PlaneICP_GN(
       std::execution::par,
       index.begin(),
       index.end(),
-      ResultType(Eigen::Matrix<double, 6, 6>::Zero(), Eigen::Matrix<double, 6, 1>::Zero()),
+      H_b_type(Eigen::Matrix<double, 6, 6>::Zero(), Eigen::Matrix<double, 6, 1>::Zero()),
       // 规约操作
       [](const auto& a, const auto& b) {
         return std::make_pair(a.first + b.first, a.second + b.second);
       },
       // 转换操作
       [&Hs, &bs](const int& idx) {
-        return ResultType(Hs[idx], bs[idx]);
+        return H_b_type(Hs[idx], bs[idx]);
       }
     );
 

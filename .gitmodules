@@ -1,3 +1,6 @@
 [submodule "thirdparty/small_gicp"]
 	path = thirdparty/small_gicp
 	url = https://github.com/koide3/small_gicp.git
+[submodule "thirdparty/ndt_omp"]
+	path = thirdparty/ndt_omp
+	url = https://github.com/koide3/ndt_omp.git

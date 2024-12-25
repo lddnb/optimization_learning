@@ -21,6 +21,7 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 
 add_subdirectory(thirdparty/small_gicp)
+add_subdirectory(thirdparty/ndt_omp)
 ###########
 ## Build ##
 ###########
@@ -30,6 +31,7 @@ add_subdirectory(thirdparty/small_gicp)
 include_directories(
   include
   thirdparty/small_gicp/include
+  thirdparty/ndt_omp/include
   ${GTSAM_INCLUDE_DIR}
   ${PCL_INCLUDE_DIRS}
 )
@@ -78,16 +80,17 @@ if (BUILD_TESTING)
     glog::glog
     gtsam
   )
-  ament_add_gtest(test_icp test/test_icp.cpp)
-  ament_target_dependencies(test_icp
+  ament_add_gtest(registration_test test/registration_test.cpp)
+  ament_target_dependencies(registration_test
     rclcpp
   )
-  target_link_libraries(test_icp
+  target_link_libraries(registration_test
     ${PCL_LIBRARIES}
     Ceres::ceres
     glog::glog
     gtsam
     small_gicp
+    ndt_omp
   )
 endif()
 

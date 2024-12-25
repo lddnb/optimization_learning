@@ -2,7 +2,7 @@
  * @ Author: lddnb
  * @ Create Time: 2024-12-23 17:58:13
  * @ Modified by: lddnb
- * @ Modified time: 2024-12-23 18:06:29
+ * @ Modified time: 2024-12-25 17:32:18
  * @ Description:
  */
 
@@ -24,19 +24,12 @@
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/features/normal_3d_omp.h>
 #include <pcl/registration/icp.h>
+#include <pcl/registration/ndt.h>
 #include <pcl/visualization/pcl_visualizer.h>
 
-#include <small_gicp/ann/kdtree_omp.hpp>
-#include <small_gicp/points/point_cloud.hpp>
-#include <small_gicp/util/normal_estimation_omp.hpp>
-#include <small_gicp/registration/reduction_omp.hpp>
-#include <small_gicp/registration/registration.hpp>
-#include "small_gicp/factors/icp_factor.hpp"
-#include "small_gicp/factors/plane_icp_factor.hpp"
-#include <small_gicp/factors/gicp_factor.hpp>
-#include <small_gicp/registration/registration_helper.hpp>
-
 #include <optimization_learning/so3_tool.hpp>
+
+using H_b_type = std::pair<Eigen::Matrix<double, 6, 6>, Eigen::Matrix<double, 6, 1>>;
 
 // bool next_iteration = false;
 // void keyboardEventOccurred(const pcl::visualization::KeyboardEvent& event, void* nothing)
@@ -47,8 +40,6 @@
 
 // pcl::visualization::PCLVisualizer::Ptr viewer(new pcl::visualization::PCLVisualizer("3D Viewer"));
 // viewer->setBackgroundColor(0, 0, 0);
-// int v1(0);
-// int v2(1);
 // viewer->addPointCloud<pcl::PointXYZI>(source_points, "source_points");
 // viewer->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_COLOR, 1.0, 0.0, 0.0, "source_points");  // 红色
 // viewer->addPointCloud<pcl::PointXYZI>(target_points, "target_points");

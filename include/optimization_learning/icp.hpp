@@ -2,13 +2,22 @@
  * @ Author: lddnb
  * @ Create Time: 2024-12-13 14:47:47
  * @ Modified by: lddnb
- * @ Modified time: 2024-12-24 18:39:50
+ * @ Modified time: 2024-12-25 17:16:47
  * @ Description:
  */
 
 #pragma once
 
 #include "common.hpp"
+
+#include <small_gicp/ann/kdtree_omp.hpp>
+#include <small_gicp/points/point_cloud.hpp>
+#include <small_gicp/util/normal_estimation_omp.hpp>
+#include <small_gicp/registration/reduction_omp.hpp>
+#include <small_gicp/registration/registration.hpp>
+#include "small_gicp/factors/icp_factor.hpp"
+#include <small_gicp/factors/gicp_factor.hpp>
+#include <small_gicp/registration/registration_helper.hpp>
 
 struct ICPConfig
 {
@@ -256,19 +265,18 @@ void P2PICP_GN(
       });
 
     // 并行规约求和
-    using ResultType = std::pair<Eigen::Matrix<double, 6, 6>, Eigen::Matrix<double, 6, 1>>;
     auto result = std::transform_reduce(
       std::execution::par,
       index.begin(),
       index.end(),
-      ResultType(Eigen::Matrix<double, 6, 6>::Zero(), Eigen::Matrix<double, 6, 1>::Zero()),
+      H_b_type(Eigen::Matrix<double, 6, 6>::Zero(), Eigen::Matrix<double, 6, 1>::Zero()),
       // 规约操作
       [](const auto& a, const auto& b) {
         return std::make_pair(a.first + b.first, a.second + b.second);
       },
       // 转换操作
       [&Hs, &bs](const int& idx) {
-        return ResultType(Hs[idx], bs[idx]);
+        return H_b_type(Hs[idx], bs[idx]);
       }
     );
 
