@@ -2,7 +2,7 @@
  * @ Author: lddnb
  * @ Create Time: 2024-12-25 10:17:10
  * @ Modified by: lddnb
- * @ Modified time: 2024-12-25 18:09:50
+ * @ Modified time: 2024-12-27 17:55:43
  * @ Description:
  */
 
@@ -27,6 +27,8 @@ struct NDTConfig {
   int max_iterations = 30;
   double residual_outlier_threshold = 20;
   int num_residual_per_point = 7;
+  int num_threads = 4;
+  bool verbose = false;
 };
 
 // 体素内点的统计信息
@@ -37,6 +39,27 @@ struct VoxelData {
   Eigen::Matrix3d covariance = Eigen::Matrix3d::Zero();
   Eigen::Matrix3d information = Eigen::Matrix3d::Zero();
 };
+
+inline std::vector<Eigen::Vector3i> getNearbyGridsIndices(int num_residual_per_point)
+{
+  if (num_residual_per_point == 7) {
+    return {
+      Eigen::Vector3i(0, 0, 0),
+      Eigen::Vector3i(-1, 0, 0),
+      Eigen::Vector3i(1, 0, 0),
+      Eigen::Vector3i(0, -1, 0),
+      Eigen::Vector3i(0, 1, 0),
+      Eigen::Vector3i(0, 0, -1),
+      Eigen::Vector3i(0, 0, 1),
+    };
+  } else if (num_residual_per_point == 1) {
+    return {
+      Eigen::Vector3i(0, 0, 0),
+    };
+  } else {
+    return {};
+  }
+}
 
 // 体素网格
 class VoxelGrid
@@ -74,7 +97,7 @@ public:
     std::for_each(std::execution::par_unseq, voxels_.begin(), voxels_.end(), [&](auto& pair) {
       auto& voxel = pair.second;
       int num_points = voxel.indices.size();
-      if (num_points < 5) {  // 至少需要5个点才能计算协方差
+      if (num_points < 3) {
         return;
       }
       voxel.mean /= num_points;
@@ -136,9 +159,10 @@ public:
     return iter != voxels_.end() && iter->second.valid ? &iter->second : nullptr;
   }
 
+  // Todo: 为什么不能减去 min_bound_？
   Eigen::Vector3i getVoxelIndex(const Eigen::Vector3d& p) const
   {
-    return ((p - min_bound_) / resolution_).array().floor().cast<int>();
+    return ((p) / resolution_).array().floor().cast<int>();
   }
 private:
   double resolution_;
@@ -146,6 +170,420 @@ private:
   Eigen::Vector3i grid_size_;
   std::unordered_map<Eigen::Vector3i, VoxelData, EigenVec3iHash> voxels_;
 };
+
+class CeresCostFunctorNDT
+{
+public:
+  CeresCostFunctorNDT(
+    const Eigen::Vector3d& curr_point,
+    const Eigen::Vector3d& voxel_mean,
+    const Eigen::Matrix3d& information)
+  : curr_point_(curr_point),
+    voxel_mean_(voxel_mean),
+    sqrt_information_(information.llt().matrixU())
+  {
+  }
+
+  CeresCostFunctorNDT(
+    const pcl::PointXYZI& curr_point,
+    const Eigen::Vector3d& voxel_mean,
+    const Eigen::Matrix3d& information)
+  : curr_point_(curr_point.x, curr_point.y, curr_point.z),
+    voxel_mean_(voxel_mean),
+    sqrt_information_(information.llt().matrixU())
+  {
+  }
+
+  template <typename T>
+  bool operator()(const T* const se3, T* residuals) const {
+    Eigen::Map<const Eigen::Quaternion<T>> q(se3);
+    Eigen::Map<const Eigen::Matrix<T, 3, 1>> t(se3 + 4);
+
+    Eigen::Map<Eigen::Matrix<T, 3, 1>> weighted_error(residuals);
+    
+    // 计算残差向量
+    Eigen::Matrix<T, 3, 1> error = q * curr_point_.cast<T>() + t - voxel_mean_.cast<T>();
+    
+    // 应用信息矩阵的平方根
+    weighted_error = sqrt_information_.cast<T>() * error;
+    
+    return true;
+  }
+
+private:
+  Eigen::Vector3d curr_point_;
+  Eigen::Vector3d voxel_mean_;
+  Eigen::Matrix3d sqrt_information_;  // 信息矩阵的平方根
+};
+
+// SE3
+class GtsamNDTFactor : public gtsam::NoiseModelFactor1<gtsam::Pose3>
+{
+public:
+  GtsamNDTFactor(
+    gtsam::Key key,
+    const gtsam::Point3& source_point,
+    const gtsam::Point3& voxel_mean,
+    const gtsam::Matrix3& information,
+    const gtsam::SharedNoiseModel& cost_model)
+  : gtsam::NoiseModelFactor1<gtsam::Pose3>(cost_model, key),
+    source_point_(source_point),
+    voxel_mean_(voxel_mean),
+    sqrt_information_(information.llt().matrixU())
+  {
+  }
+
+  GtsamNDTFactor(
+    gtsam::Key key,
+    const pcl::PointXYZI& source_point,
+    const Eigen::Vector3d& voxel_mean,
+    const Eigen::Matrix3d& information,
+    const gtsam::SharedNoiseModel& cost_model)
+  : gtsam::NoiseModelFactor1<gtsam::Pose3>(cost_model, key),
+    source_point_(source_point.x, source_point.y, source_point.z),
+    voxel_mean_(voxel_mean),
+    sqrt_information_(information.llt().matrixU())
+  {
+  }
+
+  virtual gtsam::Vector evaluateError(
+    const gtsam::Pose3& T,
+    boost::optional<gtsam::Matrix&> H = boost::none) const override
+  {
+    gtsam::Matrix A = gtsam::Matrix::Zero(3, 6);
+    gtsam::Point3 p_trans = T.transformFrom(source_point_, A);
+    gtsam::Vector error = p_trans - voxel_mean_;
+    gtsam::Vector weighted_error = sqrt_information_ * error;
+
+    if (H) {
+      *H = sqrt_information_ * A;
+    }
+    return weighted_error;
+  }
+
+
+private:
+  gtsam::Point3 source_point_;
+  gtsam::Point3 voxel_mean_;
+  gtsam::Matrix3 sqrt_information_;
+};
+
+// SO3 + R3
+class GtsamNDTFactor2 : public gtsam::NoiseModelFactor2<gtsam::Rot3, gtsam::Point3>
+{
+public:
+  GtsamNDTFactor2(
+    gtsam::Key key1,
+    gtsam::Key key2,
+    const gtsam::Point3& source_point,
+    const gtsam::Point3& voxel_mean,
+    const gtsam::Matrix3& information,
+    const gtsam::SharedNoiseModel& cost_model)
+  : gtsam::NoiseModelFactor2<gtsam::Rot3, gtsam::Point3>(cost_model, key1, key2),
+    source_point_(source_point),
+    voxel_mean_(voxel_mean),
+    sqrt_information_(information.llt().matrixU())
+  {
+  }
+
+  GtsamNDTFactor2(
+    gtsam::Key key1,
+    gtsam::Key key2,
+    const pcl::PointXYZI& source_point,
+    const Eigen::Vector3d& voxel_mean,
+    const Eigen::Matrix3d& information,
+    const gtsam::SharedNoiseModel& cost_model)
+  : gtsam::NoiseModelFactor2<gtsam::Rot3, gtsam::Point3>(cost_model, key1, key2),
+    source_point_(source_point.x, source_point.y, source_point.z),
+    voxel_mean_(voxel_mean),
+    sqrt_information_(information.llt().matrixU())
+  {
+  }
+
+  virtual gtsam::Vector evaluateError(
+    const gtsam::Rot3& R,
+    const gtsam::Point3& t,
+    boost::optional<gtsam::Matrix&> H1 = boost::none,
+    boost::optional<gtsam::Matrix&> H2 = boost::none) const override
+  {
+    gtsam::Vector error = R * source_point_ + t - voxel_mean_;
+    gtsam::Vector weighted_error = sqrt_information_ * error;
+    
+    if (H1) {  // 对旋转的雅克比
+      // d(R*p)/dR = -R*（p^)
+      *H1 = -sqrt_information_ * R.matrix() * gtsam::SO3::Hat(source_point_);
+    }
+    
+    if (H2) {  // 对平移的雅克比
+      // d(t)/dt = I
+      *H2 = sqrt_information_;
+    }
+    
+    return weighted_error;
+  }
+
+private:
+  gtsam::Point3 source_point_;
+  gtsam::Point3 voxel_mean_;
+  gtsam::Matrix3 sqrt_information_;
+};
+
+template <typename PointT>
+void NDT_Ceres(
+  const typename pcl::PointCloud<PointT>::Ptr& source_cloud_ptr,
+  const typename pcl::PointCloud<PointT>::Ptr& target_cloud_ptr,
+  Eigen::Affine3d& result_pose,
+  int& num_iterations,
+  const NDTConfig& config)
+{
+  // 构建目标点云的NDT体素
+  VoxelGrid target_grid(config.resolution);
+  target_grid.setCloud(target_cloud_ptr);
+
+  typename pcl::PointCloud<PointT>::Ptr source_points_transformed(new pcl::PointCloud<PointT>);
+  Eigen::Quaterniond last_R = Eigen::Quaterniond(result_pose.rotation());
+  Eigen::Vector3d last_t = result_pose.translation();
+  std::vector<double> T = {last_R.x(), last_R.y(), last_R.z(), last_R.w(), last_t.x(), last_t.y(), last_t.z()};
+
+  std::vector<Eigen::Vector3i> nearby_grids_indices = getNearbyGridsIndices(config.num_residual_per_point);
+  if (nearby_grids_indices.empty()) {
+    LOG(ERROR) << "Invalid num_residual_per_point: " << config.num_residual_per_point;
+    return;
+  }
+
+  int iterations = 0;
+  for (; iterations < config.max_iterations; ++iterations) {
+    Eigen::Affine3d T_opt(Eigen::Translation3d(last_t) * last_R.toRotationMatrix());
+    pcl::transformPointCloud(*source_cloud_ptr, *source_points_transformed, T_opt);
+    
+    std::vector<CeresCostFunctorNDT *> cost_functors(source_points_transformed->size() * nearby_grids_indices.size(), nullptr);
+    std::vector<int> index(source_points_transformed->size());
+    std::iota(index.begin(), index.end(), 0);
+
+    std::for_each(std::execution::par_unseq, index.begin(), index.end(), [&](int idx) {
+      Eigen::Vector3d p_trans(
+        source_points_transformed->at(idx).x,
+        source_points_transformed->at(idx).y,
+        source_points_transformed->at(idx).z);
+      Eigen::Vector3i key = target_grid.getVoxelIndex(p_trans);
+      for (int i = 0; i < nearby_grids_indices.size(); ++i) {
+        Eigen::Vector3i voxel_idx = key + nearby_grids_indices[i];
+        auto* voxel = target_grid.getVoxel(voxel_idx);
+        if (!voxel) continue;
+        Eigen::Vector3d d = p_trans - voxel->mean;
+        double cost = d.transpose() * voxel->information * d;
+        if (std::abs(cost) > config.residual_outlier_threshold) continue;
+        cost_functors[idx * nearby_grids_indices.size() + i] = new CeresCostFunctorNDT(source_cloud_ptr->at(idx), voxel->mean, voxel->information);
+      }
+    });
+
+    ceres::Problem problem;
+    ceres::ProductManifold<ceres::EigenQuaternionManifold, ceres::EuclideanManifold<3>>* se3 =
+      new ceres::ProductManifold<ceres::EigenQuaternionManifold, ceres::EuclideanManifold<3>>;
+    problem.AddParameterBlock(T.data(), 7, se3);
+
+    for (const auto& cost_functor : cost_functors) {
+      if (cost_functor == nullptr) {
+        continue;
+      }
+      ceres::CostFunction* cost_function = new ceres::AutoDiffCostFunction<CeresCostFunctorNDT, 3, 7>(cost_functor);
+      problem.AddResidualBlock(cost_function, nullptr, T.data());
+    }
+
+    ceres::Solver::Options options;
+    options.max_num_iterations = 1;
+    options.linear_solver_type = ceres::SPARSE_NORMAL_CHOLESKY;
+    options.num_threads = config.num_threads;
+    options.minimizer_progress_to_stdout = config.verbose;
+    ceres::Solver::Summary summary;
+    ceres::Solve(options, &problem, &summary);
+
+    Eigen::Map<Eigen::Quaterniond> R(T.data());
+    Eigen::Map<Eigen::Vector3d> t(T.data() + 4);
+
+    if ((R.coeffs() - last_R.coeffs()).norm() < config.epsilon && 
+        (t - last_t).norm() < config.epsilon) {
+      break;
+    }
+    last_R = R;
+    last_t = t;
+  }
+
+  result_pose = Eigen::Affine3d(Eigen::Translation3d(last_t) * last_R.toRotationMatrix());
+  num_iterations = iterations;
+}
+
+template <typename PointT>
+void NDT_GTSAM_SE3(
+  const typename pcl::PointCloud<PointT>::Ptr& source_cloud_ptr,
+  const typename pcl::PointCloud<PointT>::Ptr& target_cloud_ptr,
+  Eigen::Affine3d& result_pose,
+  int& num_iterations,
+  const NDTConfig& config)
+{
+  // 构建目标点云的NDT体素
+  VoxelGrid target_grid(config.resolution);
+  target_grid.setCloud(target_cloud_ptr);
+
+  gtsam::Pose3 last_T_gtsam = gtsam::Pose3(gtsam::Rot3(result_pose.rotation()), gtsam::Point3(result_pose.translation()));
+  typename pcl::PointCloud<PointT>::Ptr source_points_transformed(new pcl::PointCloud<PointT>);
+
+  const gtsam::Key key1 = gtsam::symbol_shorthand::X(0);
+  gtsam::SharedNoiseModel noise_model = gtsam::noiseModel::Isotropic::Sigma(3, 1);
+  gtsam::GaussNewtonParams params_gn;
+  if (config.verbose) {
+    params_gn.setVerbosity("ERROR");
+  }
+  params_gn.maxIterations = 1;
+  params_gn.relativeErrorTol = config.epsilon;
+
+  std::vector<Eigen::Vector3i> nearby_grids_indices = getNearbyGridsIndices(config.num_residual_per_point);
+  if (nearby_grids_indices.empty()) {
+    LOG(ERROR) << "Invalid num_residual_per_point: " << config.num_residual_per_point;
+    return;
+  }
+
+  int iterations = 0;
+  for (; iterations < config.max_iterations; ++iterations) {
+    Eigen::Affine3d T_opt(last_T_gtsam.matrix());
+    pcl::transformPointCloud(*source_cloud_ptr, *source_points_transformed, T_opt);
+
+    std::vector<GtsamNDTFactor *> cost_functors(source_points_transformed->size() * nearby_grids_indices.size(), nullptr);
+    std::vector<int> index(source_points_transformed->size());
+    std::iota(index.begin(), index.end(), 0);
+
+    std::for_each(std::execution::par_unseq, index.begin(), index.end(), [&](int idx) {
+      Eigen::Vector3d p_trans(
+        source_points_transformed->at(idx).x,
+        source_points_transformed->at(idx).y,
+        source_points_transformed->at(idx).z);
+      Eigen::Vector3i key = target_grid.getVoxelIndex(p_trans);
+      for (int i = 0; i < nearby_grids_indices.size(); ++i) {
+        Eigen::Vector3i voxel_idx = key + nearby_grids_indices[i];
+        auto* voxel = target_grid.getVoxel(voxel_idx);
+        if (!voxel) continue;
+        Eigen::Vector3d d = p_trans - voxel->mean;
+        double cost = d.transpose() * voxel->information * d;
+        if (std::abs(cost) > config.residual_outlier_threshold) continue;
+        cost_functors[idx * nearby_grids_indices.size() + i] = new GtsamNDTFactor(key1, source_cloud_ptr->at(idx), voxel->mean, voxel->information, noise_model);
+      }
+    });
+
+    gtsam::NonlinearFactorGraph graph;
+    for (const auto& cost_functor : cost_functors) {
+      if (cost_functor == nullptr) {
+        continue;
+      }
+      graph.add(*cost_functor);
+    }
+
+    gtsam::Values initial_estimate;
+    initial_estimate.insert(key1, last_T_gtsam);
+    gtsam::GaussNewtonOptimizer optimizer(graph, initial_estimate, params_gn);
+    optimizer.optimize();
+
+    auto result = optimizer.values();
+    gtsam::Pose3 T_result = result.at<gtsam::Pose3>(key1);
+
+    if (
+      (last_T_gtsam.rotation().toQuaternion().coeffs() -
+       T_result.rotation().toQuaternion().coeffs()).norm() < config.epsilon &&
+      (last_T_gtsam.translation() - T_result.translation()).norm() < config.epsilon) {
+      break;
+    }
+    last_T_gtsam = T_result;
+  }
+  num_iterations = iterations;
+  result_pose = Eigen::Affine3d(last_T_gtsam.matrix());
+}
+
+template <typename PointT>
+void NDT_GTSAM_SO3_R3(
+  const typename pcl::PointCloud<PointT>::Ptr& source_cloud_ptr,
+  const typename pcl::PointCloud<PointT>::Ptr& target_cloud_ptr,
+  Eigen::Affine3d& result_pose,
+  int& num_iterations,
+  const NDTConfig& config)
+{
+  // 构建目标点云的NDT体素
+  VoxelGrid target_grid(config.resolution);
+  target_grid.setCloud(target_cloud_ptr);
+
+  gtsam::Rot3 last_R_gtsam = gtsam::Rot3(result_pose.rotation());
+  gtsam::Point3 last_t_gtsam = gtsam::Point3(result_pose.translation());
+  typename pcl::PointCloud<PointT>::Ptr source_points_transformed(new pcl::PointCloud<PointT>);
+
+  const gtsam::Key key1 = gtsam::symbol_shorthand::X(0);
+  const gtsam::Key key2 = gtsam::symbol_shorthand::X(1);
+  gtsam::SharedNoiseModel noise_model = gtsam::noiseModel::Isotropic::Sigma(3, 1);
+  gtsam::GaussNewtonParams params_gn;
+  if (config.verbose) {
+    params_gn.setVerbosity("ERROR");
+  }
+  params_gn.maxIterations = 1;
+  params_gn.relativeErrorTol = config.epsilon;
+
+  std::vector<Eigen::Vector3i> nearby_grids_indices = getNearbyGridsIndices(config.num_residual_per_point);
+  if (nearby_grids_indices.empty()) {
+    LOG(ERROR) << "Invalid num_residual_per_point: " << config.num_residual_per_point;
+    return;
+  }
+
+  int iterations = 0;
+  for (; iterations < config.max_iterations; ++iterations) {
+    Eigen::Affine3d T_opt(Eigen::Translation3d(last_t_gtsam) * last_R_gtsam.matrix());
+    pcl::transformPointCloud(*source_cloud_ptr, *source_points_transformed, T_opt);
+
+    std::vector<GtsamNDTFactor2 *> cost_functors(source_points_transformed->size() * nearby_grids_indices.size(), nullptr);
+    std::vector<int> index(source_points_transformed->size());
+    std::iota(index.begin(), index.end(), 0);
+
+    std::for_each(std::execution::par_unseq, index.begin(), index.end(), [&](int idx) {
+      Eigen::Vector3d p_trans(
+        source_points_transformed->at(idx).x,
+        source_points_transformed->at(idx).y,
+        source_points_transformed->at(idx).z);
+      Eigen::Vector3i key = target_grid.getVoxelIndex(p_trans);
+      for (int i = 0; i < nearby_grids_indices.size(); ++i) {
+        Eigen::Vector3i voxel_idx = key + nearby_grids_indices[i];
+        auto* voxel = target_grid.getVoxel(voxel_idx);
+        if (!voxel) continue;
+        Eigen::Vector3d d = p_trans - voxel->mean;
+        double cost = d.transpose() * voxel->information * d;
+        if (std::abs(cost) > config.residual_outlier_threshold) continue;
+        cost_functors[idx * nearby_grids_indices.size() + i] = new GtsamNDTFactor2(key1, key2, source_cloud_ptr->at(idx), voxel->mean, voxel->information, noise_model);
+      }
+    });
+
+    gtsam::NonlinearFactorGraph graph;
+    for (const auto& cost_functor : cost_functors) {
+      if (cost_functor == nullptr) {
+        continue;
+      }
+      graph.add(*cost_functor);
+    }
+
+    gtsam::Values initial_estimate;
+    initial_estimate.insert(key1, last_R_gtsam);
+    initial_estimate.insert(key2, last_t_gtsam);
+    gtsam::GaussNewtonOptimizer optimizer(graph, initial_estimate, params_gn);
+    optimizer.optimize();
+
+    auto result = optimizer.values();
+    gtsam::Rot3 R_result = result.at<gtsam::Rot3>(key1);
+    gtsam::Point3 t_result = result.at<gtsam::Point3>(key2);
+
+    if (
+      (R_result.toQuaternion().coeffs() - last_R_gtsam.toQuaternion().coeffs()).norm() < config.epsilon &&
+      (t_result - last_t_gtsam).norm() < config.epsilon) {
+      break;
+    }
+    last_R_gtsam = R_result;
+    last_t_gtsam = t_result;
+  }
+  num_iterations = iterations;
+  result_pose = Eigen::Affine3d(Eigen::Translation3d(last_t_gtsam) * last_R_gtsam.matrix());
+}
 
 template <typename PointT>
 void NDT_GN(
@@ -162,22 +600,8 @@ void NDT_GN(
   typename pcl::PointCloud<PointT>::Ptr source_points_transformed(new pcl::PointCloud<PointT>);
   Eigen::Matrix4d T = result_pose.matrix();
 
-  std::vector<Eigen::Vector3i> nearby_grids_indices;
-  if (config.num_residual_per_point == 7) {
-    nearby_grids_indices = {
-      Eigen::Vector3i(0, 0, 0),
-      Eigen::Vector3i(0, 0, 1),
-      Eigen::Vector3i(0, 1, 0),
-      Eigen::Vector3i(1, 0, 0),
-      Eigen::Vector3i(0, 0, -1),
-      Eigen::Vector3i(0, -1, 0),
-      Eigen::Vector3i(-1, 0, 0),
-    };
-  } else if (config.num_residual_per_point == 1) {
-    nearby_grids_indices = {
-      Eigen::Vector3i(0, 0, 0),
-    };
-  } else {
+  std::vector<Eigen::Vector3i> nearby_grids_indices = getNearbyGridsIndices(config.num_residual_per_point);
+  if (nearby_grids_indices.empty()) {
     LOG(ERROR) << "Invalid num_residual_per_point: " << config.num_residual_per_point;
     return;
   }
@@ -197,7 +621,7 @@ void NDT_GN(
 
     std::atomic<int> num_valid_points = 0;
 
-    std::for_each(std::execution::par, index.begin(), index.end(), [&](int idx) {
+    std::for_each(std::execution::par_unseq, index.begin(), index.end(), [&](int idx) {
       Eigen::Vector3d p_trans(
         source_points_transformed->at(idx).x,
         source_points_transformed->at(idx).y,
@@ -205,20 +629,26 @@ void NDT_GN(
       Eigen::Vector3i key = target_grid.getVoxelIndex(p_trans);
       Eigen::Matrix<double, 6, 6> H_sum = Eigen::Matrix<double, 6, 6>::Zero();
       Eigen::Matrix<double, 6, 1> b_sum = Eigen::Matrix<double, 6, 1>::Zero();
-      for (size_t i = 0; i < nearby_grids_indices.size(); ++i) {
-        Eigen::Vector3i voxel_idx = key + nearby_grids_indices[i];
+      for (const auto& nearby_idx : nearby_grids_indices) {
+        Eigen::Vector3i voxel_idx = key + nearby_idx;
         auto* voxel = target_grid.getVoxel(voxel_idx);
         if (!voxel) continue;
         Eigen::Vector3d d = p_trans - voxel->mean;
         double cost = d.transpose() * voxel->information * d;
-        if (std::abs(cost) > config.residual_outlier_threshold) return;
+        //! 注意区分 continue 和 return
+        if (std::abs(cost) > config.residual_outlier_threshold) continue;
 
         num_valid_points.fetch_add(1);
+
+        Eigen::Vector3d source_point(
+          source_cloud_ptr->at(idx).x,
+          source_cloud_ptr->at(idx).y,
+          source_cloud_ptr->at(idx).z);
 
         // 计算雅可比矩阵
         Eigen::Matrix<double, 3, 6> J;
         J.block<3, 3>(0, 0) = Eigen::Matrix3d::Identity();
-        J.block<3, 3>(0, 3) = -T.block<3, 3>(0, 0) * Hat(p_trans);
+        J.block<3, 3>(0, 3) = -T.block<3, 3>(0, 0) * Hat(source_point);
 
         // 计算海森矩阵和梯度
         Eigen::Matrix3d W = voxel->information;
@@ -315,27 +745,4 @@ void NDT_OMP(
 
   result_pose = ndt_omp->getFinalTransformation().template cast<double>();
   num_iterations = ndt_omp->getFinalNumIteration();
-
-  // // 创建输出点云的智能指针
-  // typename pcl::PointCloud<PointT>::ConstPtr output_cloud_ptr(new pcl::PointCloud<PointT>(output_cloud));
-  // typename pcl::PointCloud<PointT>::ConstPtr source_cloud_const_ptr = source_cloud_ptr;
-  // typename pcl::PointCloud<PointT>::ConstPtr target_cloud_const_ptr = target_cloud_ptr;
-
-  // pcl::visualization::PCLVisualizer::Ptr viewer(new pcl::visualization::PCLVisualizer("3D Viewer"));
-  // viewer->setBackgroundColor(0, 0, 0);
-  
-  // // 使用ConstPtr类型添加点云
-  // // viewer->addPointCloud<PointT>(source_cloud_const_ptr, "source_points");
-  // // viewer->setPointCloudRenderingProperties(
-  // //   pcl::visualization::PCL_VISUALIZER_COLOR, 1.0, 0.0, 0.0, "source_points");  // 红色
-    
-  // viewer->addPointCloud<PointT>(target_cloud_const_ptr, "target_points");
-  // viewer->setPointCloudRenderingProperties(
-  //   pcl::visualization::PCL_VISUALIZER_COLOR, 0.0, 1.0, 0.0, "target_points");  // 绿色
-    
-  // viewer->addPointCloud<PointT>(output_cloud_ptr, "source_points_transformed");
-  // viewer->setPointCloudRenderingProperties(
-  //   pcl::visualization::PCL_VISUALIZER_COLOR, 0.0, 0.0, 1.0, "source_points_transformed");  // 蓝色
-
-  // viewer->spin();
 }

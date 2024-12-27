@@ -257,6 +257,9 @@ TEST_F(RegistrationTest, NDT) {
   LOG(INFO) << "source points size: " << source_points->size();
   LOG(INFO) << "target points size: " << target_points->size();
 
+  R_true = Eigen::Quaterniond().Identity();
+  t_true = Eigen::Vector3d(-0.489, -0.123, 0.029);
+
   LOG(INFO) << "======================== NDT ========================";
   double R_err = 0.1;
   double t_err = 0.1;
@@ -264,12 +267,51 @@ TEST_F(RegistrationTest, NDT) {
   Eigen::Affine3d T_opt;
   int iterations;
 
-  LOG(INFO) << "------------------- NDT GN ------------------";
+  LOG(INFO) << "------------------- NDT Ceres ------------------";
   auto start = std::chrono::high_resolution_clock::now();
   T_opt = Eigen::Affine3d::Identity();
-  NDT_GN<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config3);
+  NDT_Ceres<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config3);
   auto end = std::chrono::high_resolution_clock::now();
   auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+  LOG(INFO) << "Time elapsed: " << duration << " us";
+  LOG(INFO) << "iterations: " << iterations;
+  LOG(INFO) << "R: " << Eigen::Quaterniond(T_opt.rotation()).coeffs().transpose();
+  LOG(INFO) << "t: " << T_opt.translation().transpose();
+  EXPECT_NEAR((Eigen::Quaterniond(T_opt.rotation()).coeffs() - R_true.coeffs()).norm(), 0, R_err);
+  EXPECT_NEAR((T_opt.translation() - t_true).norm(), 0, t_err);
+
+  LOG(INFO) << "------------------- NDT GTSAM SE3 ------------------";
+  start = std::chrono::high_resolution_clock::now();
+  T_opt = Eigen::Affine3d::Identity();
+  NDT_GTSAM_SE3<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config3);
+  end = std::chrono::high_resolution_clock::now();
+  duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+  LOG(INFO) << "Time elapsed: " << duration << " us";
+  LOG(INFO) << "iterations: " << iterations;
+  LOG(INFO) << "R: " << Eigen::Quaterniond(T_opt.rotation()).coeffs().transpose();
+  LOG(INFO) << "t: " << T_opt.translation().transpose();
+  EXPECT_NEAR((Eigen::Quaterniond(T_opt.rotation()).coeffs() - R_true.coeffs()).norm(), 0, R_err);
+  EXPECT_NEAR((T_opt.translation() - t_true).norm(), 0, t_err);
+
+  LOG(INFO) << "------------------- NDT GTSAM SO3+R3 ------------------";
+  start = std::chrono::high_resolution_clock::now();
+  T_opt = Eigen::Affine3d::Identity();
+  NDT_GTSAM_SO3_R3<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config3);
+  end = std::chrono::high_resolution_clock::now();
+  duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+  LOG(INFO) << "Time elapsed: " << duration << " us";
+  LOG(INFO) << "iterations: " << iterations;
+  LOG(INFO) << "R: " << Eigen::Quaterniond(T_opt.rotation()).coeffs().transpose();
+  LOG(INFO) << "t: " << T_opt.translation().transpose();
+  EXPECT_NEAR((Eigen::Quaterniond(T_opt.rotation()).coeffs() - R_true.coeffs()).norm(), 0, R_err);
+  EXPECT_NEAR((T_opt.translation() - t_true).norm(), 0, t_err);
+
+  LOG(INFO) << "------------------- NDT GN ------------------";
+  start = std::chrono::high_resolution_clock::now();
+  T_opt = Eigen::Affine3d::Identity();
+  NDT_GN<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config3);
+  end = std::chrono::high_resolution_clock::now();
+  duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
   LOG(INFO) << "Time elapsed: " << duration << " us";
   LOG(INFO) << "iterations: " << iterations;
   LOG(INFO) << "R: " << Eigen::Quaterniond(T_opt.rotation()).coeffs().transpose();

@@ -2,7 +2,7 @@
  * @ Author: lddnb
  * @ Create Time: 2024-12-19 15:04:38
  * @ Modified by: lddnb
- * @ Modified time: 2024-12-25 17:15:53
+ * @ Modified time: 2024-12-27 17:21:35
  * @ Description:
  */
 
@@ -250,28 +250,22 @@ void P2PlaneICP_Ceres(
     std::iota(index.begin(), index.end(), 0);
 
     // 并行执行近邻搜索
-    std::for_each(
-      std::execution::par_unseq,
-      index.begin(),
-      index.end(),
-      [&](int idx) {
-        std::vector<int> nn_indices(1);
-        std::vector<float> nn_distances(1);
-        bool valid = kdtree.nearestKSearch(source_points_transformed->at(idx), 1, nn_indices, nn_distances) > 0;
+    std::for_each(std::execution::par_unseq, index.begin(), index.end(), [&](int idx) {
+      std::vector<int> nn_indices(1);
+      std::vector<float> nn_distances(1);
+      bool valid = kdtree.nearestKSearch(source_points_transformed->at(idx), 1, nn_indices, nn_distances) > 0;
 
-        if (!valid || nn_distances[0] > config.max_correspondence_distance) {
-          return;
-        }
-        const auto& normal = target_normals->at(nn_indices[0]);
-        if (!pcl::isFinite(normal)) {
-          return;
-        }
+      if (!valid || nn_distances[0] > config.max_correspondence_distance) {
+        return;
+      }
+      const auto& normal = target_normals->at(nn_indices[0]);
+      if (!pcl::isFinite(normal)) {
+        return;
+      }
 
-        cost_functors[idx] = new CeresCostFunctorP2Plane(
-          source_cloud_ptr->at(idx),
-          target_cloud_ptr->at(nn_indices[0]),
-          normal);
-      });
+      cost_functors[idx] =
+        new CeresCostFunctorP2Plane(source_cloud_ptr->at(idx), target_cloud_ptr->at(nn_indices[0]), normal);
+    });
 
     ceres::Problem problem;
     ceres::ProductManifold<ceres::EigenQuaternionManifold, ceres::EuclideanManifold<3>>* se3 =
@@ -498,7 +492,6 @@ void P2PlaneICP_GTSAM_SO3_R3(
     last_t_gtsam = t_result;
   }
   num_iterations = iterations;
-
   result_pose = Eigen::Affine3d(Eigen::Translation3d(last_t_gtsam) * last_R_gtsam.matrix());
 }
 

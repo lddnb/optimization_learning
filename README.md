@@ -14,6 +14,7 @@ Todo list
 - [x]  create dev container
 - [x]  Migrate to ROS2 jazzy
 - [x]  Add point-to-plane ICP
+- [x]  Add NDT 
 - [ ]  Add GICP 
 
 Question
