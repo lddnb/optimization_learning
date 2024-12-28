@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.20)
 project(optimization_learning)
 
+option(BUILD_BENCHMARKING "Build benchmarks" ON)
+
 SET(CMAKE_BUILD_TYPE "Release")
 add_compile_options(-std=c++17)
 set(CMAKE_CXX_STANDARD 17)
@@ -91,6 +93,24 @@ if (BUILD_TESTING)
     gtsam
     small_gicp
     ndt_omp
+  )
+endif()
+
+if (BUILD_BENCHMARKING)
+  find_package(benchmark REQUIRED)
+  add_executable(registration_benchmark benchmark/registration_benchmark.cpp)
+  target_link_libraries(registration_benchmark
+    ${PCL_LIBRARIES}
+    Ceres::ceres
+    glog::glog
+    gtsam
+    small_gicp
+    ndt_omp
+    benchmark::benchmark
+  )
+
+  install(TARGETS registration_benchmark
+    DESTINATION lib/${PROJECT_NAME}
   )
 endif()
 
