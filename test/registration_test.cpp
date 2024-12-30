@@ -1,8 +1,8 @@
 /**
  * @ Author: lddnb
  * @ Create Time: 2024-12-24 11:35:43
- * @ Modified by: lddnb
- * @ Modified time: 2024-12-25 12:13:20
+ * @ Modified by: Your name
+ * @ Modified time: 2024-12-30 22:51:52
  * @ Description:
  */
 
@@ -13,6 +13,7 @@
 
 #include "optimization_learning/icp.hpp"
 #include "optimization_learning/point_to_plane_icp.hpp"
+#include "optimization_learning/gicp.hpp"
 #include "optimization_learning/ndt.hpp"
 class RegistrationTest : public ::testing::Test {
 protected:
@@ -59,7 +60,8 @@ protected:
   Eigen::Affine3d T_init;
   ICPConfig config;
   PointToPlaneICPConfig config2;
-  NDTConfig config3;
+  GICPConfig config3;
+  NDTConfig config4;
 };
 
 TEST_F(RegistrationTest, PointToPointICP) {
@@ -238,6 +240,28 @@ TEST_F(RegistrationTest, PointToPlaneICP) {
   EXPECT_NEAR((T_opt.translation() - t_true).norm(), 0, t_err);
 }
 
+TEST_F(RegistrationTest, GICP) {
+  LOG(INFO) << "======================== GICP ========================";
+  double R_err = 0.1;
+  double t_err = 0.1;
+  
+  Eigen::Affine3d T_opt;
+  int iterations;
+
+  LOG(INFO) << "------------------- GN ------------------";
+  auto start = std::chrono::high_resolution_clock::now();
+  T_opt = T_init;
+  GICP_GN<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config3);
+  auto end = std::chrono::high_resolution_clock::now();
+  auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+  LOG(INFO) << "Time elapsed: " << duration << " us";
+  LOG(INFO) << "iterations: " << iterations;
+  LOG(INFO) << "R: " << Eigen::Quaterniond(T_opt.rotation()).coeffs().transpose();
+  LOG(INFO) << "t: " << T_opt.translation().transpose();
+  EXPECT_NEAR((Eigen::Quaterniond(T_opt.rotation()).coeffs() - R_true.coeffs()).norm(), 0, R_err);
+  EXPECT_NEAR((T_opt.translation() - t_true).norm(), 0, t_err);
+}
+
 TEST_F(RegistrationTest, NDT) {
   pcl::io::loadPCDFile<pcl::PointXYZI>(
     "/home/ubuntu/ros_ws/src/optimization_learning/thirdparty/ndt_omp/data/251370668.pcd",
@@ -270,7 +294,7 @@ TEST_F(RegistrationTest, NDT) {
   LOG(INFO) << "------------------- NDT Ceres ------------------";
   auto start = std::chrono::high_resolution_clock::now();
   T_opt = Eigen::Affine3d::Identity();
-  NDT_Ceres<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config3);
+  NDT_Ceres<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config4);
   auto end = std::chrono::high_resolution_clock::now();
   auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
   LOG(INFO) << "Time elapsed: " << duration << " us";
@@ -283,7 +307,7 @@ TEST_F(RegistrationTest, NDT) {
   LOG(INFO) << "------------------- NDT GTSAM SE3 ------------------";
   start = std::chrono::high_resolution_clock::now();
   T_opt = Eigen::Affine3d::Identity();
-  NDT_GTSAM_SE3<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config3);
+  NDT_GTSAM_SE3<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config4);
   end = std::chrono::high_resolution_clock::now();
   duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
   LOG(INFO) << "Time elapsed: " << duration << " us";
@@ -296,7 +320,7 @@ TEST_F(RegistrationTest, NDT) {
   LOG(INFO) << "------------------- NDT GTSAM SO3+R3 ------------------";
   start = std::chrono::high_resolution_clock::now();
   T_opt = Eigen::Affine3d::Identity();
-  NDT_GTSAM_SO3_R3<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config3);
+  NDT_GTSAM_SO3_R3<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config4);
   end = std::chrono::high_resolution_clock::now();
   duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
   LOG(INFO) << "Time elapsed: " << duration << " us";
@@ -309,7 +333,7 @@ TEST_F(RegistrationTest, NDT) {
   LOG(INFO) << "------------------- NDT GN ------------------";
   start = std::chrono::high_resolution_clock::now();
   T_opt = Eigen::Affine3d::Identity();
-  NDT_GN<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config3);
+  NDT_GN<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config4);
   end = std::chrono::high_resolution_clock::now();
   duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
   LOG(INFO) << "Time elapsed: " << duration << " us";
@@ -322,7 +346,7 @@ TEST_F(RegistrationTest, NDT) {
   LOG(INFO) << "------------------- NDT PCL ------------------";
   start = std::chrono::high_resolution_clock::now();
   T_opt = Eigen::Affine3d::Identity();
-  NDT_PCL<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config3);
+  NDT_PCL<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config4);
   end = std::chrono::high_resolution_clock::now();
   duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
   LOG(INFO) << "Time elapsed: " << duration << " us";
@@ -335,7 +359,7 @@ TEST_F(RegistrationTest, NDT) {
   LOG(INFO) << "------------------- NDT OMP ------------------";
   start = std::chrono::high_resolution_clock::now();
   T_opt = Eigen::Affine3d::Identity();
-  NDT_OMP<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config3);
+  NDT_OMP<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config4);
   end = std::chrono::high_resolution_clock::now();
   duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
   LOG(INFO) << "Time elapsed: " << duration << " us";

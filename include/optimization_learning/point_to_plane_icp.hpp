@@ -1,8 +1,8 @@
 /**
  * @ Author: lddnb
  * @ Create Time: 2024-12-19 15:04:38
- * @ Modified by: lddnb
- * @ Modified time: 2024-12-27 17:21:35
+ * @ Modified by: Your name
+ * @ Modified time: 2024-12-30 22:00:32
  * @ Description:
  */
 
@@ -16,7 +16,6 @@
 #include <small_gicp/registration/reduction_omp.hpp>
 #include <small_gicp/registration/registration.hpp>
 #include "small_gicp/factors/plane_icp_factor.hpp"
-#include <small_gicp/factors/gicp_factor.hpp>
 #include <small_gicp/registration/registration_helper.hpp>
 struct PointToPlaneICPConfig
 {
