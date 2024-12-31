@@ -1,8 +1,8 @@
 /**
  * @ Author: Your name
  * @ Create Time: 1970-01-01 08:00:00
- * @ Modified by: lddnb
- * @ Modified time: 2024-12-31 15:27:34
+ * @ Modified by: Your name
+ * @ Modified time: 2024-12-31 21:41:34
  * @ Description:
  */
 
@@ -33,17 +33,87 @@ int num_neighbors = 10;
 
 // 计算点云协方差
 template <typename PointT>
-std::vector<Eigen::Matrix3d> ComputeCovariance(const typename pcl::PointCloud<PointT>::Ptr& points_ptr, int num_neighbors)
+std::vector<Eigen::Matrix3d> ComputeCovariancePSTL(const typename pcl::PointCloud<PointT>::Ptr& points_ptr, int num_neighbors)
 {
   std::vector<Eigen::Matrix3d> covariances(points_ptr->size(), Eigen::Matrix3d::Zero());
   pcl::KdTreeFLANN<PointT> kdtree;
   kdtree.setInputCloud(points_ptr);
-  for (size_t i = 0; i < points_ptr->size(); ++i) {
+  std::vector<int> index(points_ptr->size());
+  std::iota(index.begin(), index.end(), 0);
+
+  std::for_each(std::execution::par, index.begin(), index.end(), [&](const int& i) {
+    const PointT point = points_ptr->at(i);  // 获取当前点的索引
     std::vector<int> nn_indices(num_neighbors);
     std::vector<float> nn_distances(num_neighbors);
-    const int n = kdtree.nearestKSearch(points_ptr->at(i), num_neighbors, nn_indices, nn_distances);
+    const int n = kdtree.nearestKSearch(point, num_neighbors, nn_indices, nn_distances);
     if (n < 5 || nn_distances.back() > 1) {
-      continue;
+      return;  // 跳过不满足条件的点
+    }
+
+    Eigen::Vector3d mean = Eigen::Vector3d::Zero();
+    Eigen::Matrix3d covariance = Eigen::Matrix3d::Zero();
+    for (size_t j = 0; j < n; ++j) {
+      const auto& idx = nn_indices[j];
+      const Eigen::Vector3d cur_p(points_ptr->at(idx).x, points_ptr->at(idx).y, points_ptr->at(idx).z);
+      mean += cur_p;
+      covariance += cur_p * cur_p.transpose();
+    }
+    mean = mean / n;
+    covariance = covariance / n - mean * mean.transpose();
+    covariances[i] = covariance;
+  });
+
+  return covariances;
+}
+
+template <typename PointT>
+std::vector<Eigen::Matrix3d> ComputeCovarianceOMP(const typename pcl::PointCloud<PointT>::Ptr& points_ptr, int num_neighbors)
+{
+  std::vector<Eigen::Matrix3d> covariances(points_ptr->size(), Eigen::Matrix3d::Zero());
+  pcl::KdTreeFLANN<PointT> kdtree;
+  kdtree.setInputCloud(points_ptr);
+  
+  #pragma omp parallel for
+  for (size_t i = 0; i < points_ptr->size(); ++i) {
+    const PointT point = points_ptr->at(i);
+    std::vector<int> nn_indices(num_neighbors);
+    std::vector<float> nn_distances(num_neighbors);
+    const int n = kdtree.nearestKSearch(point, num_neighbors, nn_indices, nn_distances);
+    if (n < 5 || nn_distances.back() > 1) {
+      continue; 
+    }
+
+    Eigen::Vector3d mean = Eigen::Vector3d::Zero();
+    Eigen::Matrix3d covariance = Eigen::Matrix3d::Zero();
+    for (size_t j = 0; j < n; ++j) {
+      const auto& idx = nn_indices[j];
+      const Eigen::Vector3d cur_p(points_ptr->at(idx).x, points_ptr->at(idx).y, points_ptr->at(idx).z);
+      mean += cur_p;
+      covariance += cur_p * cur_p.transpose();
+    }
+    mean = mean / n;
+    covariance = covariance / n - mean * mean.transpose();
+    covariances[i] = covariance;
+  }
+
+  return covariances;
+}
+
+
+template <typename PointT>
+std::vector<Eigen::Matrix3d> ComputeCovarianceSEQ(const typename pcl::PointCloud<PointT>::Ptr& points_ptr, int num_neighbors)
+{
+  std::vector<Eigen::Matrix3d> covariances(points_ptr->size(), Eigen::Matrix3d::Zero());
+  pcl::KdTreeFLANN<PointT> kdtree;
+  kdtree.setInputCloud(points_ptr);
+  
+  for (size_t i = 0; i < points_ptr->size(); ++i) {
+    const PointT point = points_ptr->at(i);
+    std::vector<int> nn_indices(num_neighbors);
+    std::vector<float> nn_distances(num_neighbors);
+    const int n = kdtree.nearestKSearch(point, num_neighbors, nn_indices, nn_distances);
+    if (n < 5 || nn_distances.back() > 1) {
+      continue; 
     }
 
     Eigen::Vector3d mean = Eigen::Vector3d::Zero();
@@ -233,8 +303,8 @@ void GICP_Ceres(
   pcl::KdTreeFLANN<PointT> kdtree;
   kdtree.setInputCloud(target_cloud_ptr);
 
-  auto source_covariance = ComputeCovariance<PointT>(source_cloud_ptr, config.num_neighbors);
-  auto target_covariance = ComputeCovariance<PointT>(target_cloud_ptr, config.num_neighbors);
+  auto source_covariance = ComputeCovariancePSTL<PointT>(source_cloud_ptr, config.num_neighbors);
+  auto target_covariance = ComputeCovariancePSTL<PointT>(target_cloud_ptr, config.num_neighbors);
 
   int iterations = 0;
   for (; iterations < config.max_iterations; ++iterations) {
@@ -317,8 +387,8 @@ void GICP_GTSAM_SE3(
   typename pcl::PointCloud<PointT>::Ptr source_points_transformed(new pcl::PointCloud<PointT>);
   pcl::KdTreeFLANN<PointT> kdtree;
   kdtree.setInputCloud(target_cloud_ptr);
-  auto source_covariance = ComputeCovariance<PointT>(source_cloud_ptr, config.num_neighbors);
-  auto target_covariance = ComputeCovariance<PointT>(target_cloud_ptr, config.num_neighbors);
+  auto source_covariance = ComputeCovariancePSTL<PointT>(source_cloud_ptr, config.num_neighbors);
+  auto target_covariance = ComputeCovariancePSTL<PointT>(target_cloud_ptr, config.num_neighbors);
   const gtsam::Key key = gtsam::symbol_shorthand::X(0);
   gtsam::SharedNoiseModel noise_model = gtsam::noiseModel::Isotropic::Sigma(3, 1);
   gtsam::GaussNewtonParams params_gn;
@@ -417,8 +487,8 @@ void GICP_GTSAM_SO3_R3(
   typename pcl::PointCloud<PointT>::Ptr source_points_transformed(new pcl::PointCloud<PointT>);
   pcl::KdTreeFLANN<PointT> kdtree;
   kdtree.setInputCloud(target_cloud_ptr);
-  auto source_covariance = ComputeCovariance<PointT>(source_cloud_ptr, config.num_neighbors);
-  auto target_covariance = ComputeCovariance<PointT>(target_cloud_ptr, config.num_neighbors);
+  auto source_covariance = ComputeCovariancePSTL<PointT>(source_cloud_ptr, config.num_neighbors);
+  auto target_covariance = ComputeCovariancePSTL<PointT>(target_cloud_ptr, config.num_neighbors);
   const gtsam::Key key1 = gtsam::symbol_shorthand::X(0);
   const gtsam::Key key2 = gtsam::symbol_shorthand::X(1);
   gtsam::SharedNoiseModel noise_model = gtsam::noiseModel::Isotropic::Sigma(3, 1);
@@ -515,8 +585,8 @@ void GICP_GN(
   typename pcl::PointCloud<PointT>::Ptr source_points_transformed(new pcl::PointCloud<PointT>);
   pcl::KdTreeFLANN<PointT> kdtree;
   kdtree.setInputCloud(target_cloud_ptr);
-  auto source_covariance = ComputeCovariance<PointT>(source_cloud_ptr, config.num_neighbors);
-  auto target_covariance = ComputeCovariance<PointT>(target_cloud_ptr, config.num_neighbors);
+  auto source_covariance = ComputeCovariancePSTL<PointT>(source_cloud_ptr, config.num_neighbors);
+  auto target_covariance = ComputeCovariancePSTL<PointT>(target_cloud_ptr, config.num_neighbors);
   Eigen::Matrix4d last_T = result_pose.matrix();
 
   int iterations = 0;

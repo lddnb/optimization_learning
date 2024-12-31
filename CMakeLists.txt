@@ -109,7 +109,18 @@ if (BUILD_BENCHMARKING)
     benchmark::benchmark
   )
 
-  install(TARGETS registration_benchmark
+  add_executable(parallel_benchmark benchmark/parallel_benchmark.cpp)
+  target_link_libraries(parallel_benchmark
+    ${PCL_LIBRARIES}
+    Ceres::ceres
+    glog::glog
+    gtsam
+    small_gicp
+    ndt_omp
+    benchmark::benchmark
+  )
+
+  install(TARGETS registration_benchmark parallel_benchmark
     DESTINATION lib/${PROJECT_NAME}
   )
 endif()
