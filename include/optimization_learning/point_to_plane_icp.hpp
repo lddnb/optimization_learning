@@ -1,8 +1,8 @@
 /**
  * @ Author: lddnb
  * @ Create Time: 2024-12-19 15:04:38
- * @ Modified by: Your name
- * @ Modified time: 2024-12-30 22:00:32
+ * @ Modified by: lddnb
+ * @ Modified time: 2024-12-31 14:55:42
  * @ Description:
  */
 
@@ -648,14 +648,15 @@ void P2PlaneICP_PCL(
   nicp.setInputSource(source_cloud_with_normal);
   nicp.setInputTarget(target_cloud_with_normal);
   nicp.setMaxCorrespondenceDistance(config.max_correspondence_distance);
-  nicp.setTransformationEpsilon(1e-5);
-  nicp.setEuclideanFitnessEpsilon(1e-5);
+  nicp.setTransformationEpsilon(config.translation_eps);
+  nicp.setEuclideanFitnessEpsilon(config.translation_eps);
   nicp.setMaximumIterations(config.max_iterations);
 
   pcl::PointCloud<pcl::PointXYZINormal>::Ptr aligned(new pcl::PointCloud<pcl::PointXYZINormal>);
   nicp.align(*aligned, result_pose.matrix().cast<float>());
   
   result_pose = nicp.getFinalTransformation().cast<double>();
+  num_iterations = nicp.nr_iterations_;
 }
 
 

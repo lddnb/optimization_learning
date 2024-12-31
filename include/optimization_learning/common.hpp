@@ -2,7 +2,7 @@
  * @ Author: lddnb
  * @ Create Time: 2024-12-23 17:58:13
  * @ Modified by: lddnb
- * @ Modified time: 2024-12-25 17:32:18
+ * @ Modified time: 2024-12-31 15:57:40
  * @ Description:
  */
 
@@ -17,6 +17,7 @@
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
 #include <gtsam/nonlinear/Values.h>
 #include <gtsam/nonlinear/GaussNewtonOptimizer.h>
+#include <gtsam/nonlinear/LevenbergMarquardtOptimizer.h>
 #include <pcl/point_types.h>
 #include <pcl/point_cloud.h>
 #include <pcl/kdtree/kdtree_flann.h>
@@ -24,6 +25,7 @@
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/features/normal_3d_omp.h>
 #include <pcl/registration/icp.h>
+#include <pcl/registration/gicp.h>
 #include <pcl/registration/ndt.h>
 #include <pcl/visualization/pcl_visualizer.h>
 

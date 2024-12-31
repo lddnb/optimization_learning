@@ -15,14 +15,14 @@ Todo list
 - [x]  Migrate to ROS2 jazzy
 - [x]  Add point-to-plane ICP
 - [x]  Add NDT 
-- [ ]  Add GICP 
+- [x]  Add GICP 
 
 Question
 1. issue #1
 2. NICP Epsilon
 
 
-Acknowledgments
+References
 - [slam_in_autonomous_driving](https://github.com/gaoxiang12/slam_in_autonomous_driving)
 - [optimized_ICP](https://github.com/zm0612/optimized_ICP)
 - [small_gicp](https://github.com/koide3/small_gicp)

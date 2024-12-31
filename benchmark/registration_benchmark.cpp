@@ -5,6 +5,7 @@
 
 #include "optimization_learning/icp.hpp"
 #include "optimization_learning/point_to_plane_icp.hpp"
+#include "optimization_learning/gicp.hpp"
 #include "optimization_learning/ndt.hpp"
 
 class ICP : public benchmark::Fixture {
@@ -44,6 +45,7 @@ public:
   Eigen::Affine3d T_init;
   ICPConfig config;
   PointToPlaneICPConfig config2;
+  GICPConfig config3;
 };
 
 // Point to Point ICP Benchmarks
@@ -144,6 +146,54 @@ BENCHMARK_F(ICP, P2PlaneICP_small_gicp)(benchmark::State& st) {
   }
 }
 
+// GICP Benchmarks
+BENCHMARK_F(ICP, GICP_Ceres)(benchmark::State& st) {
+  for (auto _ : st) {
+    Eigen::Affine3d T_opt = T_init;
+    int iterations;
+    GICP_Ceres<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config3);
+  }
+}
+
+BENCHMARK_F(ICP, GICP_GTSAM_SE3)(benchmark::State& st) {
+  for (auto _ : st) {
+    Eigen::Affine3d T_opt = T_init;
+    int iterations;
+    GICP_GTSAM_SE3<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config3);
+  }
+}
+
+BENCHMARK_F(ICP, GICP_GTSAM_SO3_R3)(benchmark::State& st) {
+  for (auto _ : st) {
+    Eigen::Affine3d T_opt = T_init;
+    int iterations;
+    GICP_GTSAM_SO3_R3<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config3);
+  }
+}
+
+BENCHMARK_F(ICP, GICP_GN)(benchmark::State& st) {
+  for (auto _ : st) {
+    Eigen::Affine3d T_opt = T_init;
+    int iterations;
+    GICP_GN<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config3);
+  }
+}
+
+BENCHMARK_F(ICP, GICP_PCL)(benchmark::State& st) {
+  for (auto _ : st) {
+    Eigen::Affine3d T_opt = T_init;
+    int iterations;
+    GICP_PCL<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config3);
+  }
+}
+
+BENCHMARK_F(ICP, GICP_small_gicp)(benchmark::State& st) {
+  for (auto _ : st) {
+    Eigen::Affine3d T_opt = T_init;
+    int iterations;
+    GICP_small_gicp<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config3);
+  }
+}
 
 class NDT : public benchmark::Fixture {
 public:
