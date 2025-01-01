@@ -2,7 +2,7 @@
  * @ Author: lddnb
  * @ Create Time: 2024-12-24 11:35:43
  * @ Modified by: Your name
- * @ Modified time: 2024-12-30 22:51:52
+ * @ Modified time: 2025-01-01 19:15:25
  * @ Description:
  */
 
@@ -37,12 +37,16 @@ protected:
     
     R_true = Eigen::Quaterniond(Eigen::AngleAxisd(1.5, Eigen::Vector3d::UnitX()));
     t_true = Eigen::Vector3d(1, 2, 3);
-    T_true = Eigen::Affine3d(Eigen::Translation3d(t_true) * R_true.toRotationMatrix());
-    pcl::transformPointCloud(*target_points, *target_points, T_true);
+    T_true = Eigen::Isometry3d::Identity();
+    T_true.translation() = t_true;
+    T_true.linear() = R_true.toRotationMatrix();
+    pcl::transformPointCloud(*target_points, *target_points, T_true.matrix());
 
     R_init = Eigen::Quaterniond(Eigen::AngleAxisd(1.45, Eigen::Vector3d::UnitX()));
     t_init = Eigen::Vector3d(1.2, 2.2, 3.2);
-    T_init = Eigen::Affine3d(Eigen::Translation3d(t_init) * R_init.toRotationMatrix());
+    T_init = Eigen::Isometry3d::Identity();
+    T_init.translation() = t_init;
+    T_init.linear() = R_init.toRotationMatrix();
 
     LOG(INFO) << "R_init: " << R_init.coeffs().transpose();
     LOG(INFO) << "t_init: " << t_init.transpose();
@@ -54,28 +58,32 @@ protected:
   pcl::PointCloud<pcl::PointXYZI>::Ptr target_points;
   Eigen::Quaterniond R_true;
   Eigen::Vector3d t_true;
-  Eigen::Affine3d T_true;
+  Eigen::Isometry3d T_true;
   Eigen::Quaterniond R_init;
   Eigen::Vector3d t_init;
-  Eigen::Affine3d T_init;
-  ICPConfig config;
-  PointToPlaneICPConfig config2;
-  GICPConfig config3;
-  NDTConfig config4;
+  Eigen::Isometry3d T_init;
+  RegistrationConfig config;
+
+  std::unique_ptr<RegistrationBase<pcl::PointXYZI>> registration;
 };
 
-TEST_F(RegistrationTest, PointToPointICP) {
+TEST_F(RegistrationTest, ICP) {
   LOG(INFO) << "======================== Point to Point ICP ========================";
   double R_err = 0.1;
   double t_err = 0.3;
 
-  Eigen::Affine3d T_opt;
+  Eigen::Isometry3d T_opt = Eigen::Isometry3d::Identity();
   int iterations;
+
+  registration = std::make_unique<ICPRegistration<pcl::PointXYZI>>(config);
+  registration->setInitialTransformation(T_init);
+  registration->setInputSource(source_points);
+  registration->setInputTarget(target_points);
 
   LOG(INFO) << "------------------- Ceres ------------------";
   auto start = std::chrono::high_resolution_clock::now();
-  T_opt = T_init;
-  P2PICP_Ceres<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config);
+  registration->config().solve_type = RegistrationConfig::Ceres;
+  registration->align(T_opt, iterations);
   auto end = std::chrono::high_resolution_clock::now();
   auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
   LOG(INFO) << "Time elapsed: " << duration << " us";
@@ -87,8 +95,8 @@ TEST_F(RegistrationTest, PointToPointICP) {
 
   LOG(INFO) << "------------------- GTSAM SE3 ------------------";
   start = std::chrono::high_resolution_clock::now();
-  T_opt = T_init;
-  P2PICP_GTSAM_SE3<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config);
+  registration->config().solve_type = RegistrationConfig::GTSAM_SE3;
+  registration->align(T_opt, iterations);
   end = std::chrono::high_resolution_clock::now();
   duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
   LOG(INFO) << "Time elapsed: " << duration << " us";
@@ -100,8 +108,8 @@ TEST_F(RegistrationTest, PointToPointICP) {
 
   LOG(INFO) << "------------------- GTSAM SO3+R3 ------------------";
   start = std::chrono::high_resolution_clock::now();
-  T_opt = T_init;
-  P2PICP_GTSAM_SO3_R3<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config);
+  registration->config().solve_type = RegistrationConfig::GTSAM_SO3_R3;
+  registration->align(T_opt, iterations);
   end = std::chrono::high_resolution_clock::now();
   duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
   LOG(INFO) << "Time elapsed: " << duration << " us";
@@ -113,8 +121,8 @@ TEST_F(RegistrationTest, PointToPointICP) {
 
   LOG(INFO) << "------------------- GN ------------------";
   start = std::chrono::high_resolution_clock::now();
-  T_opt = T_init;
-  P2PICP_GN<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config);
+  registration->config().solve_type = RegistrationConfig::GN;
+  registration->align(T_opt, iterations);
   end = std::chrono::high_resolution_clock::now();
   duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
   LOG(INFO) << "Time elapsed: " << duration << " us";
@@ -126,8 +134,8 @@ TEST_F(RegistrationTest, PointToPointICP) {
 
   LOG(INFO) << "------------------- PCL ICP ------------------";
   start = std::chrono::high_resolution_clock::now();
-  T_opt = T_init;
-  P2PICP_PCL<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config);
+  registration->config().solve_type = RegistrationConfig::PCL;
+  registration->align(T_opt, iterations);
   end = std::chrono::high_resolution_clock::now();
   duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
   LOG(INFO) << "Time elapsed: " << duration << " us";
@@ -139,9 +147,9 @@ TEST_F(RegistrationTest, PointToPointICP) {
 
   LOG(INFO) << "------------------- small_gicp icp ------------------";
   start = std::chrono::high_resolution_clock::now();
-  T_opt = T_init;
+  registration->config().solve_type = RegistrationConfig::small_gicp;
   config.rotation_eps = 0.1 * M_PI / 180.0;
-  ICP_small_gicp<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config);
+  registration->align(T_opt, iterations);
   end = std::chrono::high_resolution_clock::now();
   duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
   LOG(INFO) << "Time elapsed: " << duration << " us";
@@ -152,18 +160,23 @@ TEST_F(RegistrationTest, PointToPointICP) {
   EXPECT_NEAR((T_opt.translation() - t_true).norm(), 0, t_err);
 }
 
-TEST_F(RegistrationTest, PointToPlaneICP) {
+TEST_F(RegistrationTest, NICP) {
   LOG(INFO) << "======================== Point to Plane ICP ========================";
   double R_err = 0.1;
   double t_err = 0.1;
-  
-  Eigen::Affine3d T_opt;
+
+  Eigen::Isometry3d T_opt = Eigen::Isometry3d::Identity();
   int iterations;
+
+  registration = std::make_unique<NICPRegistration<pcl::PointXYZI>>(config);
+  registration->setInitialTransformation(T_init);
+  registration->setInputSource(source_points);
+  registration->setInputTarget(target_points);
 
   LOG(INFO) << "------------------- Ceres ------------------";
   auto start = std::chrono::high_resolution_clock::now();
-  T_opt = T_init;
-  P2PlaneICP_Ceres<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config2);
+  registration->config().solve_type = RegistrationConfig::Ceres;
+  registration->align(T_opt, iterations);
   auto end = std::chrono::high_resolution_clock::now();
   auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
   LOG(INFO) << "Time elapsed: " << duration << " us";
@@ -175,8 +188,8 @@ TEST_F(RegistrationTest, PointToPlaneICP) {
 
   LOG(INFO) << "------------------- GTSAM SE3 ------------------";
   start = std::chrono::high_resolution_clock::now();
-  T_opt = T_init;
-  P2PlaneICP_GTSAM_SE3<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config2);
+  registration->config().solve_type = RegistrationConfig::GTSAM_SE3;
+  registration->align(T_opt, iterations);
   end = std::chrono::high_resolution_clock::now();
   duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
   LOG(INFO) << "Time elapsed: " << duration << " us";
@@ -188,8 +201,8 @@ TEST_F(RegistrationTest, PointToPlaneICP) {
 
   LOG(INFO) << "------------------- GTSAM SO3+R3 ------------------";
   start = std::chrono::high_resolution_clock::now();
-  T_opt = T_init;
-  P2PlaneICP_GTSAM_SO3_R3<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config2);
+  registration->config().solve_type = RegistrationConfig::GTSAM_SO3_R3;
+  registration->align(T_opt, iterations);
   end = std::chrono::high_resolution_clock::now();
   duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
   LOG(INFO) << "Time elapsed: " << duration << " us";
@@ -201,8 +214,8 @@ TEST_F(RegistrationTest, PointToPlaneICP) {
 
   LOG(INFO) << "------------------- GN ------------------";
   start = std::chrono::high_resolution_clock::now();
-  T_opt = T_init;
-  P2PlaneICP_GN<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config2);
+  registration->config().solve_type = RegistrationConfig::GN;
+  registration->align(T_opt, iterations);
   end = std::chrono::high_resolution_clock::now();
   duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
   LOG(INFO) << "Time elapsed: " << duration << " us";
@@ -214,8 +227,8 @@ TEST_F(RegistrationTest, PointToPlaneICP) {
 
   LOG(INFO) << "------------------- PCL NICP ------------------";
   start = std::chrono::high_resolution_clock::now();
-  T_opt = T_init;
-  P2PlaneICP_PCL<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config2);
+  registration->config().solve_type = RegistrationConfig::PCL;
+  registration->align(T_opt, iterations);
   end = std::chrono::high_resolution_clock::now();
   duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
   LOG(INFO) << "Time elapsed: " << duration << " us";
@@ -227,9 +240,9 @@ TEST_F(RegistrationTest, PointToPlaneICP) {
 
   LOG(INFO) << "------------------- small_gicp point to plane icp ------------------";
   start = std::chrono::high_resolution_clock::now();
-  T_opt = T_init;
-  config2.rotation_eps = 0.1 * M_PI / 180.0;
-  P2PlaneICP_small_gicp<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config2);
+  registration->config().solve_type = RegistrationConfig::small_gicp;
+  config.rotation_eps = 0.1 * M_PI / 180.0;
+  registration->align(T_opt, iterations);
   end = std::chrono::high_resolution_clock::now();
   duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
   LOG(INFO) << "Time elapsed: " << duration << " us";
@@ -245,13 +258,18 @@ TEST_F(RegistrationTest, GICP) {
   double R_err = 0.1;
   double t_err = 0.1;
   
-  Eigen::Affine3d T_opt;
+  Eigen::Isometry3d T_opt = Eigen::Isometry3d::Identity();
   int iterations;
+
+  registration = std::make_unique<GICPRegistration<pcl::PointXYZI>>(config);
+  registration->setInitialTransformation(T_init);
+  registration->setInputSource(source_points);
+  registration->setInputTarget(target_points);
 
   LOG(INFO) << "------------------- Ceres ------------------";
   auto start = std::chrono::high_resolution_clock::now();
-  T_opt = T_init;
-  GICP_Ceres<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config3);
+  registration->config().solve_type = RegistrationConfig::Ceres;
+  registration->align(T_opt, iterations);
   auto end = std::chrono::high_resolution_clock::now();
   auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
   LOG(INFO) << "Time elapsed: " << duration << " us";
@@ -263,8 +281,8 @@ TEST_F(RegistrationTest, GICP) {
 
   LOG(INFO) << "------------------- GTSAM SE3 ------------------";
   start = std::chrono::high_resolution_clock::now();
-  T_opt = T_init;
-  GICP_GTSAM_SE3<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config3);
+  registration->config().solve_type = RegistrationConfig::GTSAM_SE3;
+  registration->align(T_opt, iterations);
   end = std::chrono::high_resolution_clock::now();
   duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
   LOG(INFO) << "Time elapsed: " << duration << " us";
@@ -276,8 +294,8 @@ TEST_F(RegistrationTest, GICP) {
 
   LOG(INFO) << "------------------- GTSAM SO3 + R3 ------------------";
   start = std::chrono::high_resolution_clock::now();
-  T_opt = T_init;
-  GICP_GTSAM_SO3_R3<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config3);
+  registration->config().solve_type = RegistrationConfig::GTSAM_SO3_R3;
+  registration->align(T_opt, iterations);
   end = std::chrono::high_resolution_clock::now();
   duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
   LOG(INFO) << "Time elapsed: " << duration << " us";
@@ -289,8 +307,8 @@ TEST_F(RegistrationTest, GICP) {
 
   LOG(INFO) << "------------------- GN ------------------";
   start = std::chrono::high_resolution_clock::now();
-  T_opt = T_init;
-  GICP_GN<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config3);
+  registration->config().solve_type = RegistrationConfig::GN;
+  registration->align(T_opt, iterations);
   end = std::chrono::high_resolution_clock::now();
   duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
   LOG(INFO) << "Time elapsed: " << duration << " us";
@@ -303,11 +321,11 @@ TEST_F(RegistrationTest, GICP) {
   LOG(INFO) << "------------------- PCL GICP ------------------";
   start = std::chrono::high_resolution_clock::now();
   T_opt = T_init;
-  GICP_PCL<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config3);
+  GICP_PCL<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config);
   end = std::chrono::high_resolution_clock::now();
   duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
-  LOG(INFO) << "Time elapsed: " << duration << " us";
-  LOG(INFO) << "iterations: " << iterations;
+  registration->config().solve_type = RegistrationConfig::PCL;
+  registration->align(T_opt, iterations);
   LOG(INFO) << "R: " << Eigen::Quaterniond(T_opt.rotation()).coeffs().transpose();
   LOG(INFO) << "t: " << T_opt.translation().transpose();
   EXPECT_NEAR((Eigen::Quaterniond(T_opt.rotation()).coeffs() - R_true.coeffs()).norm(), 0, R_err);
@@ -315,8 +333,8 @@ TEST_F(RegistrationTest, GICP) {
 
   LOG(INFO) << "------------------- small_gicp ------------------";
   start = std::chrono::high_resolution_clock::now();
-  T_opt = T_init;
-  GICP_small_gicp<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config3);
+  registration->config().solve_type = RegistrationConfig::small_gicp;
+  registration->align(T_opt, iterations);
   end = std::chrono::high_resolution_clock::now();
   duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
   LOG(INFO) << "Time elapsed: " << duration << " us";
@@ -353,13 +371,18 @@ TEST_F(RegistrationTest, NDT) {
   double R_err = 0.1;
   double t_err = 0.1;
   
-  Eigen::Affine3d T_opt;
+  Eigen::Isometry3d T_opt = Eigen::Isometry3d::Identity();
   int iterations;
+
+  registration = std::make_unique<NDTRegistration<pcl::PointXYZI>>(config);
+  registration->setInitialTransformation(Eigen::Isometry3d::Identity());
+  registration->setInputSource(source_points);
+  registration->setInputTarget(target_points);
 
   LOG(INFO) << "------------------- NDT Ceres ------------------";
   auto start = std::chrono::high_resolution_clock::now();
-  T_opt = Eigen::Affine3d::Identity();
-  NDT_Ceres<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config4);
+  registration->config().solve_type = RegistrationConfig::Ceres;
+  registration->align(T_opt, iterations);
   auto end = std::chrono::high_resolution_clock::now();
   auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
   LOG(INFO) << "Time elapsed: " << duration << " us";
@@ -371,8 +394,8 @@ TEST_F(RegistrationTest, NDT) {
 
   LOG(INFO) << "------------------- NDT GTSAM SE3 ------------------";
   start = std::chrono::high_resolution_clock::now();
-  T_opt = Eigen::Affine3d::Identity();
-  NDT_GTSAM_SE3<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config4);
+  registration->config().solve_type = RegistrationConfig::GTSAM_SE3;
+  registration->align(T_opt, iterations);
   end = std::chrono::high_resolution_clock::now();
   duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
   LOG(INFO) << "Time elapsed: " << duration << " us";
@@ -384,8 +407,8 @@ TEST_F(RegistrationTest, NDT) {
 
   LOG(INFO) << "------------------- NDT GTSAM SO3+R3 ------------------";
   start = std::chrono::high_resolution_clock::now();
-  T_opt = Eigen::Affine3d::Identity();
-  NDT_GTSAM_SO3_R3<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config4);
+  registration->config().solve_type = RegistrationConfig::GTSAM_SO3_R3;
+  registration->align(T_opt, iterations);
   end = std::chrono::high_resolution_clock::now();
   duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
   LOG(INFO) << "Time elapsed: " << duration << " us";
@@ -397,8 +420,8 @@ TEST_F(RegistrationTest, NDT) {
 
   LOG(INFO) << "------------------- NDT GN ------------------";
   start = std::chrono::high_resolution_clock::now();
-  T_opt = Eigen::Affine3d::Identity();
-  NDT_GN<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config4);
+  registration->config().solve_type = RegistrationConfig::GN;
+  registration->align(T_opt, iterations);
   end = std::chrono::high_resolution_clock::now();
   duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
   LOG(INFO) << "Time elapsed: " << duration << " us";
@@ -410,8 +433,8 @@ TEST_F(RegistrationTest, NDT) {
 
   LOG(INFO) << "------------------- NDT PCL ------------------";
   start = std::chrono::high_resolution_clock::now();
-  T_opt = Eigen::Affine3d::Identity();
-  NDT_PCL<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config4);
+  registration->config().solve_type = RegistrationConfig::PCL;
+  registration->align(T_opt, iterations);
   end = std::chrono::high_resolution_clock::now();
   duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
   LOG(INFO) << "Time elapsed: " << duration << " us";
@@ -423,8 +446,8 @@ TEST_F(RegistrationTest, NDT) {
 
   LOG(INFO) << "------------------- NDT OMP ------------------";
   start = std::chrono::high_resolution_clock::now();
-  T_opt = Eigen::Affine3d::Identity();
-  NDT_OMP<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config4);
+  registration->config().solve_type = RegistrationConfig::OMP;
+  registration->align(T_opt, iterations);
   end = std::chrono::high_resolution_clock::now();
   duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
   LOG(INFO) << "Time elapsed: " << duration << " us";

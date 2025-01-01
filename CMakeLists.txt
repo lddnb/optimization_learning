@@ -21,6 +21,9 @@ find_package(Ceres REQUIRED)
 
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(sensor_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(pcl_conversions REQUIRED)
 
 add_subdirectory(thirdparty/small_gicp)
 add_subdirectory(thirdparty/ndt_omp)
@@ -66,7 +69,24 @@ target_link_libraries(icp
   gtsam
 )
 
-install(TARGETS R_mean icp
+add_executable(odometry_node src/odometry.cpp)
+target_link_libraries(odometry_node
+  ${PCL_LIBRARIES}
+  Ceres::ceres
+  glog::glog
+  gtsam
+  ndt_omp
+  small_gicp
+)
+
+ament_target_dependencies(odometry_node
+  rclcpp
+  sensor_msgs
+  geometry_msgs
+  pcl_conversions
+)
+
+install(TARGETS R_mean icp odometry_node
   DESTINATION lib/${PROJECT_NAME}
 )
 

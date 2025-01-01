@@ -1,14 +1,15 @@
 /**
  * @ Author: lddnb
  * @ Create Time: 2024-12-13 14:47:47
- * @ Modified by: lddnb
- * @ Modified time: 2024-12-25 17:16:47
+ * @ Modified by: Your name
+ * @ Modified time: 2025-01-01 18:58:13
  * @ Description:
  */
 
 #pragma once
 
-#include "common.hpp"
+#include "optimization_learning/common.hpp"
+#include "optimization_learning/registration_base.hpp"
 
 #include <small_gicp/ann/kdtree_omp.hpp>
 #include <small_gicp/points/point_cloud.hpp>
@@ -18,17 +19,6 @@
 #include "small_gicp/factors/icp_factor.hpp"
 #include <small_gicp/factors/gicp_factor.hpp>
 #include <small_gicp/registration/registration_helper.hpp>
-
-struct ICPConfig
-{
-double downsampling_resolution = 0.25;
-double max_correspondence_distance = 1.0;
-double rotation_eps = 1e-3;  // 0.1 * M_PI / 180.0
-double translation_eps = 1e-3;
-int num_threads = 4;
-int max_iterations = 30;
-bool verbose = false;
-};
 
 class CeresCostFunctor
 {
@@ -208,9 +198,9 @@ template <typename PointT>
 void P2PICP_GN(
   const typename pcl::PointCloud<PointT>::Ptr& source_cloud_ptr,
   const typename pcl::PointCloud<PointT>::Ptr& target_cloud_ptr,
-  Eigen::Affine3d& result_pose,
+  Eigen::Isometry3d& result_pose,
   int& num_iterations,
-  const ICPConfig& config)
+  const RegistrationConfig& config)
 {
   typename pcl::PointCloud<PointT>::Ptr source_points_transformed(new pcl::PointCloud<PointT>);
   pcl::KdTreeFLANN<PointT> kdtree;
@@ -305,9 +295,9 @@ template <typename PointT>
 void P2PICP_Ceres(
   const typename pcl::PointCloud<PointT>::Ptr& source_cloud_ptr,
   const typename pcl::PointCloud<PointT>::Ptr& target_cloud_ptr,
-  Eigen::Affine3d& result_pose,
+  Eigen::Isometry3d& result_pose,
   int& num_iterations,
-  const ICPConfig& config)
+  const RegistrationConfig& config)
 {
   Eigen::Quaterniond last_R = Eigen::Quaterniond(result_pose.rotation());
   Eigen::Vector3d last_t = result_pose.translation();
@@ -319,8 +309,10 @@ void P2PICP_Ceres(
 
   int iterations = 0;
   for (; iterations < config.max_iterations; ++iterations) {
-    Eigen::Affine3d T_opt(Eigen::Translation3d(last_t) * last_R.toRotationMatrix());
-    pcl::transformPointCloud(*source_cloud_ptr, *source_points_transformed, T_opt);
+    Eigen::Isometry3d T_opt = Eigen::Isometry3d::Identity();
+    T_opt.linear() = last_R.toRotationMatrix();
+    T_opt.translation() = last_t;
+    pcl::transformPointCloud(*source_cloud_ptr, *source_points_transformed, T_opt.matrix());
 
     std::vector<CeresCostFunctor*> cost_functors(source_points_transformed->size(), nullptr);
     std::vector<int> index(source_points_transformed->size());
@@ -377,7 +369,8 @@ void P2PICP_Ceres(
     last_t = t;
   }
 
-  result_pose = Eigen::Affine3d(Eigen::Translation3d(last_t) * last_R.toRotationMatrix());
+  result_pose.translation() = last_t;
+  result_pose.linear() = last_R.toRotationMatrix();
   num_iterations = iterations;
 }
 
@@ -385,9 +378,9 @@ template <typename PointT>
 void P2PICP_GTSAM_SE3(
   const typename pcl::PointCloud<PointT>::Ptr& source_cloud_ptr,
   const typename pcl::PointCloud<PointT>::Ptr& target_cloud_ptr,
-  Eigen::Affine3d& result_pose,
+  Eigen::Isometry3d& result_pose,
   int& num_iterations,
-  const ICPConfig& config)
+  const RegistrationConfig& config)
 {
   gtsam::Pose3 last_T_gtsam = gtsam::Pose3(gtsam::Rot3(result_pose.rotation()), gtsam::Point3(result_pose.translation()));
   typename pcl::PointCloud<PointT>::Ptr source_points_transformed(new pcl::PointCloud<PointT>);
@@ -404,8 +397,8 @@ void P2PICP_GTSAM_SE3(
 
   int iterations = 0;
   for (; iterations < config.max_iterations; ++iterations) {
-    Eigen::Affine3d T_opt(last_T_gtsam.matrix());
-    pcl::transformPointCloud(*source_cloud_ptr, *source_points_transformed, T_opt);
+    Eigen::Isometry3d T_opt(last_T_gtsam.matrix());
+    pcl::transformPointCloud(*source_cloud_ptr, *source_points_transformed, T_opt.matrix());
 
     std::vector<GtsamIcpFactor*> cost_functors(source_points_transformed->size(), nullptr);
     std::vector<int> index(source_points_transformed->size());
@@ -455,7 +448,7 @@ void P2PICP_GTSAM_SE3(
     last_T_gtsam = T_result;
   }
 
-  result_pose = Eigen::Affine3d(last_T_gtsam.matrix());
+  result_pose = Eigen::Isometry3d(last_T_gtsam.matrix());
   num_iterations = iterations;
 }
 
@@ -463,9 +456,9 @@ template <typename PointT>
 void P2PICP_GTSAM_SO3_R3(
   const typename pcl::PointCloud<PointT>::Ptr& source_cloud_ptr,
   const typename pcl::PointCloud<PointT>::Ptr& target_cloud_ptr,
-  Eigen::Affine3d& result_pose,
+  Eigen::Isometry3d& result_pose,
   int& num_iterations,
-  const ICPConfig& config)
+  const RegistrationConfig& config)
 {
   gtsam::Rot3 last_R_gtsam = gtsam::Rot3(result_pose.rotation());
   gtsam::Point3 last_t_gtsam = gtsam::Point3(result_pose.translation());
@@ -484,8 +477,10 @@ void P2PICP_GTSAM_SO3_R3(
 
   int iterations = 0;
   for (; iterations < config.max_iterations; ++iterations) {
-    Eigen::Affine3d T_opt(Eigen::Translation3d(last_t_gtsam) * last_R_gtsam.matrix());
-    pcl::transformPointCloud(*source_cloud_ptr, *source_points_transformed, T_opt);
+    Eigen::Isometry3d T_opt = Eigen::Isometry3d::Identity();
+    T_opt.linear() = last_R_gtsam.matrix();
+    T_opt.translation() = last_t_gtsam;
+    pcl::transformPointCloud(*source_cloud_ptr, *source_points_transformed, T_opt.matrix());
 
     std::vector<GtsamIcpFactor2*> cost_functors(source_points_transformed->size(), nullptr);
     std::vector<int> index(source_points_transformed->size());
@@ -539,7 +534,8 @@ void P2PICP_GTSAM_SO3_R3(
     last_t_gtsam = t_result;
   }
 
-  result_pose = Eigen::Affine3d(Eigen::Translation3d(last_t_gtsam) * last_R_gtsam.matrix());
+  result_pose.translation() = last_t_gtsam;
+  result_pose.linear() = last_R_gtsam.matrix();
   num_iterations = iterations;
 }
 
@@ -547,9 +543,9 @@ template <typename PointT>
 void P2PICP_PCL(
   const typename pcl::PointCloud<PointT>::Ptr& source_cloud_ptr,
   const typename pcl::PointCloud<PointT>::Ptr& target_cloud_ptr,
-  Eigen::Affine3d& result_pose,
+  Eigen::Isometry3d& result_pose,
   int& num_iterations,
-  const ICPConfig& config)
+  const RegistrationConfig& config)
 {
   pcl::IterativeClosestPoint<PointT, PointT> icp;
   icp.setInputSource(source_cloud_ptr);
@@ -562,18 +558,18 @@ void P2PICP_PCL(
   typename pcl::PointCloud<PointT>::Ptr aligned(new pcl::PointCloud<PointT>);
   icp.align(*aligned, result_pose.matrix().cast<float>());
 
-  result_pose = Eigen::Affine3d(icp.getFinalTransformation().template cast<double>());
+  result_pose = Eigen::Isometry3d(icp.getFinalTransformation().template cast<double>());
   num_iterations = icp.nr_iterations_;
 }
 
 // small_gicp ICP
 template <typename PointT>
-void ICP_small_gicp(
+void P2PICP_small_gicp(
   const typename pcl::PointCloud<PointT>::Ptr& source_cloud_ptr,
   const typename pcl::PointCloud<PointT>::Ptr& target_cloud_ptr,
-  Eigen::Affine3d& result_pose,
+  Eigen::Isometry3d& result_pose,
   int& num_iterations,
-  const ICPConfig& config)
+  const RegistrationConfig& config)
 {
   std::vector<Eigen::Vector3d> source_eigen(source_cloud_ptr->size());
   std::vector<Eigen::Vector3d> target_eigen(target_cloud_ptr->size());
@@ -614,3 +610,45 @@ void ICP_small_gicp(
   result_pose = result.T_target_source;
   num_iterations = result.iterations;
 }
+
+template <typename PointT>
+class ICPRegistration : public RegistrationBase<PointT>
+{
+public:
+  ICPRegistration(const RegistrationConfig& config) : RegistrationBase<PointT>(config) {}
+
+  void align(Eigen::Isometry3d& result_pose, int& num_iterations) override
+  {
+    result_pose = this->initial_transformation_;
+    switch (this->config_.solve_type) {
+      case RegistrationConfig::Ceres: {
+        P2PICP_Ceres<PointT>(this->source_cloud_, this->target_cloud_, result_pose, num_iterations, this->config_);
+        break;
+      }
+      case RegistrationConfig::GTSAM_SE3: {
+        P2PICP_GTSAM_SE3<PointT>(this->source_cloud_, this->target_cloud_, result_pose, num_iterations, this->config_);
+        break;
+      }
+      case RegistrationConfig::GTSAM_SO3_R3: {
+        P2PICP_GTSAM_SO3_R3<PointT>(this->source_cloud_, this->target_cloud_, result_pose, num_iterations, this->config_);
+        break;
+      }
+      case RegistrationConfig::GN: {
+        P2PICP_GN<PointT>(this->source_cloud_, this->target_cloud_, result_pose, num_iterations, this->config_);
+        break;
+      }
+      case RegistrationConfig::PCL: {
+        P2PICP_PCL<PointT>(this->source_cloud_, this->target_cloud_, result_pose, num_iterations, this->config_);
+        break;
+      }
+      case RegistrationConfig::small_gicp: {
+        P2PICP_small_gicp<PointT>(this->source_cloud_, this->target_cloud_, result_pose, num_iterations, this->config_);
+        break;
+      }
+      default: {
+        LOG(ERROR) << "Unknown registration solver method: " << this->config_.solve_type;
+        break;
+      }
+    }
+  }
+};

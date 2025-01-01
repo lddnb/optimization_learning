@@ -1,14 +1,15 @@
 /**
  * @ Author: lddnb
  * @ Create Time: 2024-12-25 10:17:10
- * @ Modified by: lddnb
- * @ Modified time: 2024-12-27 17:55:43
+ * @ Modified by: Your name
+ * @ Modified time: 2025-01-01 19:01:03
  * @ Description:
  */
 
 #pragma once
 
-#include "common.hpp"
+#include "optimization_learning/common.hpp"
+#include "optimization_learning/registration_base.hpp"
 #include "pclomp/ndt_omp.h"
 
 struct EigenVec3iHash {
@@ -17,18 +18,6 @@ struct EigenVec3iHash {
     return ((std::hash<int>()(v.x()) ^ (std::hash<int>()(v.y()) << 1)) >> 1) ^
            (std::hash<int>()(v.z()) << 1);
   }
-};
-
-struct NDTConfig {
-  double resolution = 1;
-  double max_correspondence_distance = 1.0;
-  double step_size = 0.1;
-  double epsilon = 1e-3;
-  int max_iterations = 30;
-  double residual_outlier_threshold = 20;
-  int num_residual_per_point = 7;
-  int num_threads = 4;
-  bool verbose = false;
 };
 
 // 体素内点的统计信息
@@ -332,9 +321,9 @@ template <typename PointT>
 void NDT_Ceres(
   const typename pcl::PointCloud<PointT>::Ptr& source_cloud_ptr,
   const typename pcl::PointCloud<PointT>::Ptr& target_cloud_ptr,
-  Eigen::Affine3d& result_pose,
+  Eigen::Isometry3d& result_pose,
   int& num_iterations,
-  const NDTConfig& config)
+  const RegistrationConfig& config)
 {
   // 构建目标点云的NDT体素
   VoxelGrid target_grid(config.resolution);
@@ -353,8 +342,10 @@ void NDT_Ceres(
 
   int iterations = 0;
   for (; iterations < config.max_iterations; ++iterations) {
-    Eigen::Affine3d T_opt(Eigen::Translation3d(last_t) * last_R.toRotationMatrix());
-    pcl::transformPointCloud(*source_cloud_ptr, *source_points_transformed, T_opt);
+    Eigen::Isometry3d T_opt = Eigen::Isometry3d::Identity();
+    T_opt.linear() = last_R.toRotationMatrix();
+    T_opt.translation() = last_t;
+    pcl::transformPointCloud(*source_cloud_ptr, *source_points_transformed, T_opt.matrix());
     
     std::vector<CeresCostFunctorNDT *> cost_functors(source_points_transformed->size() * nearby_grids_indices.size(), nullptr);
     std::vector<int> index(source_points_transformed->size());
@@ -401,15 +392,16 @@ void NDT_Ceres(
     Eigen::Map<Eigen::Quaterniond> R(T.data());
     Eigen::Map<Eigen::Vector3d> t(T.data() + 4);
 
-    if ((R.coeffs() - last_R.coeffs()).norm() < config.epsilon && 
-        (t - last_t).norm() < config.epsilon) {
+    if ((R.coeffs() - last_R.coeffs()).norm() < config.translation_eps && 
+        (t - last_t).norm() < config.rotation_eps) {
       break;
     }
     last_R = R;
     last_t = t;
   }
 
-  result_pose = Eigen::Affine3d(Eigen::Translation3d(last_t) * last_R.toRotationMatrix());
+  result_pose.translation() = last_t;
+  result_pose.linear() = last_R.toRotationMatrix();
   num_iterations = iterations;
 }
 
@@ -417,9 +409,9 @@ template <typename PointT>
 void NDT_GTSAM_SE3(
   const typename pcl::PointCloud<PointT>::Ptr& source_cloud_ptr,
   const typename pcl::PointCloud<PointT>::Ptr& target_cloud_ptr,
-  Eigen::Affine3d& result_pose,
+  Eigen::Isometry3d& result_pose,
   int& num_iterations,
-  const NDTConfig& config)
+  const RegistrationConfig& config)
 {
   // 构建目标点云的NDT体素
   VoxelGrid target_grid(config.resolution);
@@ -435,7 +427,7 @@ void NDT_GTSAM_SE3(
     params_gn.setVerbosity("ERROR");
   }
   params_gn.maxIterations = 1;
-  params_gn.relativeErrorTol = config.epsilon;
+  params_gn.relativeErrorTol = config.translation_eps;
 
   std::vector<Eigen::Vector3i> nearby_grids_indices = getNearbyGridsIndices(config.num_residual_per_point);
   if (nearby_grids_indices.empty()) {
@@ -445,8 +437,8 @@ void NDT_GTSAM_SE3(
 
   int iterations = 0;
   for (; iterations < config.max_iterations; ++iterations) {
-    Eigen::Affine3d T_opt(last_T_gtsam.matrix());
-    pcl::transformPointCloud(*source_cloud_ptr, *source_points_transformed, T_opt);
+    Eigen::Isometry3d T_opt(last_T_gtsam.matrix());
+    pcl::transformPointCloud(*source_cloud_ptr, *source_points_transformed, T_opt.matrix());
 
     std::vector<GtsamNDTFactor *> cost_functors(source_points_transformed->size() * nearby_grids_indices.size(), nullptr);
     std::vector<int> index(source_points_transformed->size());
@@ -487,23 +479,23 @@ void NDT_GTSAM_SE3(
 
     if (
       (last_T_gtsam.rotation().toQuaternion().coeffs() -
-       T_result.rotation().toQuaternion().coeffs()).norm() < config.epsilon &&
-      (last_T_gtsam.translation() - T_result.translation()).norm() < config.epsilon) {
+       T_result.rotation().toQuaternion().coeffs()).norm() < config.translation_eps &&
+      (last_T_gtsam.translation() - T_result.translation()).norm() < config.rotation_eps) {
       break;
     }
     last_T_gtsam = T_result;
   }
   num_iterations = iterations;
-  result_pose = Eigen::Affine3d(last_T_gtsam.matrix());
+  result_pose = Eigen::Isometry3d(last_T_gtsam.matrix());
 }
 
 template <typename PointT>
 void NDT_GTSAM_SO3_R3(
   const typename pcl::PointCloud<PointT>::Ptr& source_cloud_ptr,
   const typename pcl::PointCloud<PointT>::Ptr& target_cloud_ptr,
-  Eigen::Affine3d& result_pose,
+  Eigen::Isometry3d& result_pose,
   int& num_iterations,
-  const NDTConfig& config)
+  const RegistrationConfig& config)
 {
   // 构建目标点云的NDT体素
   VoxelGrid target_grid(config.resolution);
@@ -521,7 +513,7 @@ void NDT_GTSAM_SO3_R3(
     params_gn.setVerbosity("ERROR");
   }
   params_gn.maxIterations = 1;
-  params_gn.relativeErrorTol = config.epsilon;
+  params_gn.relativeErrorTol = config.translation_eps;
 
   std::vector<Eigen::Vector3i> nearby_grids_indices = getNearbyGridsIndices(config.num_residual_per_point);
   if (nearby_grids_indices.empty()) {
@@ -531,8 +523,10 @@ void NDT_GTSAM_SO3_R3(
 
   int iterations = 0;
   for (; iterations < config.max_iterations; ++iterations) {
-    Eigen::Affine3d T_opt(Eigen::Translation3d(last_t_gtsam) * last_R_gtsam.matrix());
-    pcl::transformPointCloud(*source_cloud_ptr, *source_points_transformed, T_opt);
+    Eigen::Isometry3d T_opt = Eigen::Isometry3d::Identity();
+    T_opt.linear() = last_R_gtsam.matrix();
+    T_opt.translation() = last_t_gtsam;
+    pcl::transformPointCloud(*source_cloud_ptr, *source_points_transformed, T_opt.matrix());
 
     std::vector<GtsamNDTFactor2 *> cost_functors(source_points_transformed->size() * nearby_grids_indices.size(), nullptr);
     std::vector<int> index(source_points_transformed->size());
@@ -574,24 +568,25 @@ void NDT_GTSAM_SO3_R3(
     gtsam::Point3 t_result = result.at<gtsam::Point3>(key2);
 
     if (
-      (R_result.toQuaternion().coeffs() - last_R_gtsam.toQuaternion().coeffs()).norm() < config.epsilon &&
-      (t_result - last_t_gtsam).norm() < config.epsilon) {
+      (R_result.toQuaternion().coeffs() - last_R_gtsam.toQuaternion().coeffs()).norm() < config.translation_eps &&
+      (t_result - last_t_gtsam).norm() < config.rotation_eps) {
       break;
     }
     last_R_gtsam = R_result;
     last_t_gtsam = t_result;
   }
   num_iterations = iterations;
-  result_pose = Eigen::Affine3d(Eigen::Translation3d(last_t_gtsam) * last_R_gtsam.matrix());
+  result_pose.translation() = last_t_gtsam;
+  result_pose.linear() = last_R_gtsam.matrix();
 }
 
 template <typename PointT>
 void NDT_GN(
   const typename pcl::PointCloud<PointT>::Ptr& source_cloud_ptr,
   const typename pcl::PointCloud<PointT>::Ptr& target_cloud_ptr,
-  Eigen::Affine3d& result_pose,
+  Eigen::Isometry3d& result_pose,
   int& num_iterations,
-  const NDTConfig& config)
+  const RegistrationConfig& config)
 {
   // 构建目标点云的NDT体素
   VoxelGrid target_grid(config.resolution);
@@ -691,7 +686,7 @@ void NDT_GN(
     T.block<3, 3>(0, 0) *= Exp(delta.tail<3>()).matrix();
 
     // 收敛判断
-    if (delta.norm() < config.epsilon) {
+    if (delta.norm() < config.translation_eps) {
       break;
     }
   }
@@ -704,17 +699,17 @@ template <typename PointT>
 void NDT_PCL(
   const typename pcl::PointCloud<PointT>::Ptr& source_cloud_ptr,
   const typename pcl::PointCloud<PointT>::Ptr& target_cloud_ptr,
-  Eigen::Affine3d& result_pose,
+  Eigen::Isometry3d& result_pose,
   int& num_iterations,
-  const NDTConfig& config)
+  const RegistrationConfig& config)
 {
   typename pcl::NormalDistributionsTransform<PointT, PointT>::Ptr ndt(new pcl::NormalDistributionsTransform<PointT, PointT>());
   ndt->setResolution(config.resolution);
   ndt->setInputTarget(target_cloud_ptr);
   ndt->setInputSource(source_cloud_ptr);
   ndt->setMaximumIterations(config.max_iterations);
-  ndt->setTransformationEpsilon(config.epsilon);
-  ndt->setEuclideanFitnessEpsilon(config.epsilon);
+  ndt->setTransformationEpsilon(config.translation_eps);
+  ndt->setEuclideanFitnessEpsilon(config.translation_eps);
 
   pcl::PointCloud<PointT> output_cloud;
   ndt->align(output_cloud, result_pose.matrix().cast<float>());
@@ -727,9 +722,9 @@ template <typename PointT>
 void NDT_OMP(
   const typename pcl::PointCloud<PointT>::Ptr& source_cloud_ptr,
   const typename pcl::PointCloud<PointT>::Ptr& target_cloud_ptr,
-  Eigen::Affine3d& result_pose,
+  Eigen::Isometry3d& result_pose,
   int& num_iterations,
-  const NDTConfig& config)
+  const RegistrationConfig& config)
 {
   typename pclomp::NormalDistributionsTransform<PointT, PointT>::Ptr ndt_omp(new pclomp::NormalDistributionsTransform<PointT, PointT>());
   ndt_omp->setResolution(config.resolution);
@@ -737,8 +732,8 @@ void NDT_OMP(
   ndt_omp->setInputTarget(target_cloud_ptr);
   ndt_omp->setInputSource(source_cloud_ptr);
   ndt_omp->setMaximumIterations(config.max_iterations);
-  ndt_omp->setTransformationEpsilon(config.epsilon);
-  ndt_omp->setEuclideanFitnessEpsilon(config.epsilon);
+  ndt_omp->setTransformationEpsilon(config.translation_eps);
+  ndt_omp->setEuclideanFitnessEpsilon(config.translation_eps);
 
   pcl::PointCloud<PointT> output_cloud;
   ndt_omp->align(output_cloud, result_pose.matrix().cast<float>());
@@ -746,3 +741,45 @@ void NDT_OMP(
   result_pose = ndt_omp->getFinalTransformation().template cast<double>();
   num_iterations = ndt_omp->getFinalNumIteration();
 }
+
+template <typename PointT>
+class NDTRegistration : public RegistrationBase<PointT>
+{
+public:
+  NDTRegistration(const RegistrationConfig& config) : RegistrationBase<PointT>(config) {}
+
+  void align(Eigen::Isometry3d& result_pose, int& num_iterations) override
+  {
+    result_pose = this->initial_transformation_;
+    switch (this->config_.solve_type) {
+      case RegistrationConfig::Ceres: {
+        NDT_Ceres<PointT>(this->source_cloud_, this->target_cloud_, result_pose, num_iterations, this->config_);
+        break;
+      }
+      case RegistrationConfig::GTSAM_SE3: {
+        NDT_GTSAM_SE3<PointT>(this->source_cloud_, this->target_cloud_, result_pose, num_iterations, this->config_);
+        break;
+      }
+      case RegistrationConfig::GTSAM_SO3_R3: {
+        NDT_GTSAM_SO3_R3<PointT>(this->source_cloud_, this->target_cloud_, result_pose, num_iterations, this->config_);
+        break;
+      }
+      case RegistrationConfig::GN: {
+        NDT_GN<PointT>(this->source_cloud_, this->target_cloud_, result_pose, num_iterations, this->config_);
+        break;
+      }
+      case RegistrationConfig::PCL: {
+        NDT_PCL<PointT>(this->source_cloud_, this->target_cloud_, result_pose, num_iterations, this->config_);
+        break;
+      }
+      case RegistrationConfig::OMP: {
+        NDT_OMP<PointT>(this->source_cloud_, this->target_cloud_, result_pose, num_iterations, this->config_);
+        break;
+      }
+      default: {
+        LOG(ERROR) << "Unknown registration solver method: " << this->config_.solve_type;
+        break;
+      }
+    }
+  }
+};

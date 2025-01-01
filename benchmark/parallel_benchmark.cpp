@@ -22,7 +22,7 @@ public:
   }
 
   pcl::PointCloud<pcl::PointXYZI>::Ptr points;
-  GICPConfig config;
+  RegistrationConfig config;
 };
 
 BENCHMARK_DEFINE_F(CovarianceBenchmark, ComputeCovarianceSEQ)(benchmark::State& st)

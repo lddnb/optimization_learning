@@ -27,31 +27,32 @@ public:
 
     R_true = Eigen::Quaterniond(Eigen::AngleAxisd(1.5, Eigen::Vector3d::UnitX()));
     t_true = Eigen::Vector3d(1, 2, 3);
-    T_true = Eigen::Affine3d(Eigen::Translation3d(t_true) * R_true.toRotationMatrix());
-    pcl::transformPointCloud(*target_points, *target_points, T_true);
+    T_true.translation() = t_true;
+    T_true.linear() = R_true.toRotationMatrix();
+    pcl::transformPointCloud(*target_points, *target_points, T_true.matrix());
 
     R_init = Eigen::Quaterniond(Eigen::AngleAxisd(1.45, Eigen::Vector3d::UnitX()));
     t_init = Eigen::Vector3d(1.2, 2.2, 3.2);
-    T_init = Eigen::Affine3d(Eigen::Translation3d(t_init) * R_init.toRotationMatrix());
+    T_init = Eigen::Isometry3d::Identity();
+    T_init.translation() = t_init;
+    T_init.linear() = R_init.toRotationMatrix();
   }
 
   pcl::PointCloud<pcl::PointXYZI>::Ptr source_points;
   pcl::PointCloud<pcl::PointXYZI>::Ptr target_points;
   Eigen::Quaterniond R_true;
   Eigen::Vector3d t_true;
-  Eigen::Affine3d T_true;
+  Eigen::Isometry3d T_true;
   Eigen::Quaterniond R_init;
   Eigen::Vector3d t_init;
-  Eigen::Affine3d T_init;
-  ICPConfig config;
-  PointToPlaneICPConfig config2;
-  GICPConfig config3;
+  Eigen::Isometry3d T_init;
+  RegistrationConfig config;
 };
 
 // Point to Point ICP Benchmarks
 BENCHMARK_DEFINE_F(ICP, P2PICP_Ceres)(benchmark::State& st) {
   for (auto _ : st) {
-    Eigen::Affine3d T_opt = T_init;
+    Eigen::Isometry3d T_opt = T_init;
     int iterations;
     P2PICP_Ceres<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config);
     benchmark::DoNotOptimize(T_opt);
@@ -60,7 +61,7 @@ BENCHMARK_DEFINE_F(ICP, P2PICP_Ceres)(benchmark::State& st) {
 
 BENCHMARK_DEFINE_F(ICP, P2PICP_GTSAM_SE3)(benchmark::State& st) {
   for (auto _ : st) {
-    Eigen::Affine3d T_opt = T_init;
+    Eigen::Isometry3d T_opt = T_init;
     int iterations;
     P2PICP_GTSAM_SE3<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config);
     benchmark::DoNotOptimize(T_opt);
@@ -69,7 +70,7 @@ BENCHMARK_DEFINE_F(ICP, P2PICP_GTSAM_SE3)(benchmark::State& st) {
 
 BENCHMARK_DEFINE_F(ICP, P2PICP_GTSAM_SO3_R3)(benchmark::State& st) {
   for (auto _ : st) {
-    Eigen::Affine3d T_opt = T_init;
+    Eigen::Isometry3d T_opt = T_init;
     int iterations;
     P2PICP_GTSAM_SO3_R3<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config);
     benchmark::DoNotOptimize(T_opt);
@@ -78,7 +79,7 @@ BENCHMARK_DEFINE_F(ICP, P2PICP_GTSAM_SO3_R3)(benchmark::State& st) {
 
 BENCHMARK_DEFINE_F(ICP, P2PICP_GN)(benchmark::State& st) {
   for (auto _ : st) {
-    Eigen::Affine3d T_opt = T_init;
+    Eigen::Isometry3d T_opt = T_init;
     int iterations;
     P2PICP_GN<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config);
     benchmark::DoNotOptimize(T_opt);
@@ -87,7 +88,7 @@ BENCHMARK_DEFINE_F(ICP, P2PICP_GN)(benchmark::State& st) {
 
 BENCHMARK_DEFINE_F(ICP, P2PICP_PCL)(benchmark::State& st) {
   for (auto _ : st) {
-    Eigen::Affine3d T_opt = T_init;
+    Eigen::Isometry3d T_opt = T_init;
     int iterations;
     P2PICP_PCL<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config);
     benchmark::DoNotOptimize(T_opt);
@@ -96,9 +97,9 @@ BENCHMARK_DEFINE_F(ICP, P2PICP_PCL)(benchmark::State& st) {
 
 BENCHMARK_DEFINE_F(ICP, ICP_small_gicp)(benchmark::State& st) {
   for (auto _ : st) {
-    Eigen::Affine3d T_opt = T_init;
+    Eigen::Isometry3d T_opt = T_init;
     int iterations;
-    ICP_small_gicp<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config);
+    P2PICP_small_gicp<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config);
     benchmark::DoNotOptimize(T_opt);
   }
 }
@@ -106,54 +107,54 @@ BENCHMARK_DEFINE_F(ICP, ICP_small_gicp)(benchmark::State& st) {
 // Point to Plane ICP Benchmarks
 BENCHMARK_DEFINE_F(ICP, P2PlaneICP_Ceres)(benchmark::State& st) {
   for (auto _ : st) {
-    Eigen::Affine3d T_opt = T_init;
+    Eigen::Isometry3d T_opt = T_init;
     int iterations;
-    P2PlaneICP_Ceres<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config2);
+    P2PlaneICP_Ceres<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config);
     benchmark::DoNotOptimize(T_opt);
   }
 }
 
 BENCHMARK_DEFINE_F(ICP, P2PlaneICP_GTSAM_SE3)(benchmark::State& st) {
   for (auto _ : st) {
-    Eigen::Affine3d T_opt = T_init;
+    Eigen::Isometry3d T_opt = T_init;
     int iterations;
-    P2PlaneICP_GTSAM_SE3<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config2);
+    P2PlaneICP_GTSAM_SE3<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config);
     benchmark::DoNotOptimize(T_opt);
   }
 }
 
 BENCHMARK_DEFINE_F(ICP, P2PlaneICP_GTSAM_SO3_R3)(benchmark::State& st) {
   for (auto _ : st) {
-    Eigen::Affine3d T_opt = T_init;
+    Eigen::Isometry3d T_opt = T_init;
     int iterations;
-    P2PlaneICP_GTSAM_SO3_R3<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config2);
+    P2PlaneICP_GTSAM_SO3_R3<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config);
     benchmark::DoNotOptimize(T_opt);
   }
 }
 
 BENCHMARK_DEFINE_F(ICP, P2PlaneICP_GN)(benchmark::State& st) {
   for (auto _ : st) {
-    Eigen::Affine3d T_opt = T_init;
+    Eigen::Isometry3d T_opt = T_init;
     int iterations;
-    P2PlaneICP_GN<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config2);
+    P2PlaneICP_GN<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config);
     benchmark::DoNotOptimize(T_opt);
   }
 }
 
 BENCHMARK_DEFINE_F(ICP, P2PlaneICP_PCL)(benchmark::State& st) {
   for (auto _ : st) {
-    Eigen::Affine3d T_opt = T_init;
+    Eigen::Isometry3d T_opt = T_init;
     int iterations;
-    P2PlaneICP_PCL<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config2);
+    P2PlaneICP_PCL<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config);
     benchmark::DoNotOptimize(T_opt);
   }
 }
 
 BENCHMARK_DEFINE_F(ICP, P2PlaneICP_small_gicp)(benchmark::State& st) {
   for (auto _ : st) {
-    Eigen::Affine3d T_opt = T_init;
+    Eigen::Isometry3d T_opt = T_init;
     int iterations;
-    P2PlaneICP_small_gicp<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config2);
+    P2PlaneICP_small_gicp<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config);
     benchmark::DoNotOptimize(T_opt);
   }
 }
@@ -161,54 +162,54 @@ BENCHMARK_DEFINE_F(ICP, P2PlaneICP_small_gicp)(benchmark::State& st) {
 // GICP Benchmarks
 BENCHMARK_DEFINE_F(ICP, GICP_Ceres)(benchmark::State& st) {
   for (auto _ : st) {
-    Eigen::Affine3d T_opt = T_init;
+    Eigen::Isometry3d T_opt = T_init;
     int iterations;
-    GICP_Ceres<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config3);
+    GICP_Ceres<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config);
     benchmark::DoNotOptimize(T_opt);
   }
 }
 
 BENCHMARK_DEFINE_F(ICP, GICP_GTSAM_SE3)(benchmark::State& st) {
   for (auto _ : st) {
-    Eigen::Affine3d T_opt = T_init;
+    Eigen::Isometry3d T_opt = T_init;
     int iterations;
-    GICP_GTSAM_SE3<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config3);
+    GICP_GTSAM_SE3<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config);
     benchmark::DoNotOptimize(T_opt);
   }
 }
 
 BENCHMARK_DEFINE_F(ICP, GICP_GTSAM_SO3_R3)(benchmark::State& st) {
   for (auto _ : st) {
-    Eigen::Affine3d T_opt = T_init;
+    Eigen::Isometry3d T_opt = T_init;
     int iterations;
-    GICP_GTSAM_SO3_R3<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config3);
+    GICP_GTSAM_SO3_R3<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config);
     benchmark::DoNotOptimize(T_opt);
   }
 }
 
 BENCHMARK_DEFINE_F(ICP, GICP_GN)(benchmark::State& st) {
   for (auto _ : st) {
-    Eigen::Affine3d T_opt = T_init;
+    Eigen::Isometry3d T_opt = T_init;
     int iterations;
-    GICP_GN<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config3);
+    GICP_GN<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config);
     benchmark::DoNotOptimize(T_opt);
   }
 }
 
 BENCHMARK_DEFINE_F(ICP, GICP_PCL)(benchmark::State& st) {
   for (auto _ : st) {
-    Eigen::Affine3d T_opt = T_init;
+    Eigen::Isometry3d T_opt = T_init;
     int iterations;
-    GICP_PCL<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config3);
+    GICP_PCL<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config);
     benchmark::DoNotOptimize(T_opt);
   }
 }
 
 BENCHMARK_DEFINE_F(ICP, GICP_small_gicp)(benchmark::State& st) {
   for (auto _ : st) {
-    Eigen::Affine3d T_opt = T_init;
+    Eigen::Isometry3d T_opt = T_init;
     int iterations;
-    GICP_small_gicp<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config3);
+    GICP_small_gicp<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config);
     benchmark::DoNotOptimize(T_opt);
   }
 }
@@ -236,60 +237,60 @@ public:
 
   pcl::PointCloud<pcl::PointXYZI>::Ptr source_points;
   pcl::PointCloud<pcl::PointXYZI>::Ptr target_points;
-  NDTConfig config3;
+  RegistrationConfig config;
 };
 
 // NDT Benchmarks
 BENCHMARK_DEFINE_F(NDT, NDT_Ceres)(benchmark::State& st) {
   for (auto _ : st) {
-    Eigen::Affine3d T_opt = Eigen::Affine3d::Identity();
+    Eigen::Isometry3d T_opt = Eigen::Isometry3d::Identity();
     int iterations;
-    NDT_Ceres<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config3);
+    NDT_Ceres<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config);
     benchmark::DoNotOptimize(T_opt);
   }
 }
 
 BENCHMARK_DEFINE_F(NDT, NDT_GTSAM_SE3)(benchmark::State& st) {
   for (auto _ : st) {
-    Eigen::Affine3d T_opt = Eigen::Affine3d::Identity();
+    Eigen::Isometry3d T_opt = Eigen::Isometry3d::Identity();
     int iterations;
-    NDT_GTSAM_SE3<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config3);
+    NDT_GTSAM_SE3<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config);
     benchmark::DoNotOptimize(T_opt);
   }
 }
 
 BENCHMARK_DEFINE_F(NDT, NDT_GTSAM_SO3_R3)(benchmark::State& st) {
   for (auto _ : st) {
-    Eigen::Affine3d T_opt = Eigen::Affine3d::Identity();
+    Eigen::Isometry3d T_opt = Eigen::Isometry3d::Identity();
     int iterations;
-    NDT_GTSAM_SO3_R3<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config3);
+    NDT_GTSAM_SO3_R3<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config);
     benchmark::DoNotOptimize(T_opt);
   }
 }
 
 BENCHMARK_DEFINE_F(NDT, NDT_GN)(benchmark::State& st) {
   for (auto _ : st) {
-    Eigen::Affine3d T_opt = Eigen::Affine3d::Identity();
+    Eigen::Isometry3d T_opt = Eigen::Isometry3d::Identity();
     int iterations;
-    NDT_GN<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config3);
+    NDT_GN<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config);
     benchmark::DoNotOptimize(T_opt);
   }
 }
 
 BENCHMARK_DEFINE_F(NDT, NDT_PCL)(benchmark::State& st) {
   for (auto _ : st) {
-    Eigen::Affine3d T_opt = Eigen::Affine3d::Identity();
+    Eigen::Isometry3d T_opt = Eigen::Isometry3d::Identity();
     int iterations;
-    NDT_PCL<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config3);
+    NDT_PCL<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config);
     benchmark::DoNotOptimize(T_opt);
   }
 }
 
 BENCHMARK_DEFINE_F(NDT, NDT_OMP)(benchmark::State& st) {
   for (auto _ : st) {
-    Eigen::Affine3d T_opt = Eigen::Affine3d::Identity();
+    Eigen::Isometry3d T_opt = Eigen::Isometry3d::Identity();
     int iterations;
-    NDT_OMP<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config3);
+    NDT_OMP<pcl::PointXYZI>(source_points, target_points, T_opt, iterations, config);
     benchmark::DoNotOptimize(T_opt);
   }
 }
