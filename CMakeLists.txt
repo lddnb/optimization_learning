@@ -24,6 +24,9 @@ find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(pcl_conversions REQUIRED)
+find_package(tf2 REQUIRED)
+find_package(tf2_ros REQUIRED)
+find_package(nav_msgs REQUIRED)
 
 add_subdirectory(thirdparty/small_gicp)
 add_subdirectory(thirdparty/ndt_omp)
@@ -83,11 +86,21 @@ ament_target_dependencies(odometry_node
   rclcpp
   sensor_msgs
   geometry_msgs
+  nav_msgs
   pcl_conversions
+  tf2
+  tf2_ros
 )
 
 install(TARGETS R_mean icp odometry_node
   DESTINATION lib/${PROJECT_NAME}
+)
+
+install(DIRECTORY
+  launch
+  config
+  rviz
+  DESTINATION share/${PROJECT_NAME}
 )
 
 if (BUILD_TESTING)

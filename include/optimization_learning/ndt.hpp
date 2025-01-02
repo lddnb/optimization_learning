@@ -1,8 +1,8 @@
 /**
  * @ Author: lddnb
  * @ Create Time: 2024-12-25 10:17:10
- * @ Modified by: Your name
- * @ Modified time: 2025-01-01 19:01:03
+ * @ Modified by: lddnb
+ * @ Modified time: 2025-01-02 11:48:01
  * @ Description:
  */
 
@@ -772,7 +772,7 @@ public:
         NDT_PCL<PointT>(this->source_cloud_, this->target_cloud_, result_pose, num_iterations, this->config_);
         break;
       }
-      case RegistrationConfig::OMP: {
+      case RegistrationConfig::Koide: {
         NDT_OMP<PointT>(this->source_cloud_, this->target_cloud_, result_pose, num_iterations, this->config_);
         break;
       }

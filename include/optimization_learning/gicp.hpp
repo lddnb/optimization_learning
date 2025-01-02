@@ -1,8 +1,8 @@
 /**
  * @ Author: Your name
  * @ Create Time: 1970-01-01 08:00:00
- * @ Modified by: Your name
- * @ Modified time: 2025-01-01 19:00:19
+ * @ Modified by: lddnb
+ * @ Modified time: 2025-01-02 11:47:35
  * @ Description:
  */
 
@@ -780,7 +780,7 @@ public:
         GICP_PCL<PointT>(this->source_cloud_, this->target_cloud_, result_pose, num_iterations, this->config_);
         break;
       }
-      case RegistrationConfig::small_gicp: {
+      case RegistrationConfig::Koide: {
         GICP_small_gicp<PointT>(this->source_cloud_, this->target_cloud_, result_pose, num_iterations, this->config_);
         break;
       }

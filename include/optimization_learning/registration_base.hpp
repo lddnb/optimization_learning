@@ -1,8 +1,8 @@
 /**
  * @ Author: Your name
  * @ Create Time: 1970-01-01 08:00:00
- * @ Modified by: Your name
- * @ Modified time: 2025-01-01 17:27:50
+ * @ Modified by: lddnb
+ * @ Modified time: 2025-01-02 11:47:01
  * @ Description:
  */
 
@@ -25,8 +25,7 @@ struct RegistrationConfig {
     GTSAM_SO3_R3,
     GN,
     PCL,
-    small_gicp,
-    OMP
+    Koide
   };
   RegistrationType registration_type = ICP;
   SolveType solve_type = Ceres;
@@ -35,6 +34,7 @@ struct RegistrationConfig {
   double residual_outlier_threshold = 20;
   int num_residual_per_point = 7;
   // common
+  double downsample_leaf_size = 0.1;
   double max_correspondence_distance = 1.0;
   double rotation_eps = 1e-3;
   double translation_eps = 1e-3;

@@ -1,8 +1,8 @@
 /**
  * @ Author: lddnb
  * @ Create Time: 2024-12-24 11:35:43
- * @ Modified by: Your name
- * @ Modified time: 2025-01-01 19:15:25
+ * @ Modified by: lddnb
+ * @ Modified time: 2025-01-02 11:49:33
  * @ Description:
  */
 
@@ -147,7 +147,7 @@ TEST_F(RegistrationTest, ICP) {
 
   LOG(INFO) << "------------------- small_gicp icp ------------------";
   start = std::chrono::high_resolution_clock::now();
-  registration->config().solve_type = RegistrationConfig::small_gicp;
+  registration->config().solve_type = RegistrationConfig::Koide;
   config.rotation_eps = 0.1 * M_PI / 180.0;
   registration->align(T_opt, iterations);
   end = std::chrono::high_resolution_clock::now();
@@ -240,7 +240,7 @@ TEST_F(RegistrationTest, NICP) {
 
   LOG(INFO) << "------------------- small_gicp point to plane icp ------------------";
   start = std::chrono::high_resolution_clock::now();
-  registration->config().solve_type = RegistrationConfig::small_gicp;
+  registration->config().solve_type = RegistrationConfig::Koide;
   config.rotation_eps = 0.1 * M_PI / 180.0;
   registration->align(T_opt, iterations);
   end = std::chrono::high_resolution_clock::now();
@@ -333,7 +333,7 @@ TEST_F(RegistrationTest, GICP) {
 
   LOG(INFO) << "------------------- small_gicp ------------------";
   start = std::chrono::high_resolution_clock::now();
-  registration->config().solve_type = RegistrationConfig::small_gicp;
+  registration->config().solve_type = RegistrationConfig::Koide;
   registration->align(T_opt, iterations);
   end = std::chrono::high_resolution_clock::now();
   duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
@@ -446,7 +446,7 @@ TEST_F(RegistrationTest, NDT) {
 
   LOG(INFO) << "------------------- NDT OMP ------------------";
   start = std::chrono::high_resolution_clock::now();
-  registration->config().solve_type = RegistrationConfig::OMP;
+  registration->config().solve_type = RegistrationConfig::Koide;
   registration->align(T_opt, iterations);
   end = std::chrono::high_resolution_clock::now();
   duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();

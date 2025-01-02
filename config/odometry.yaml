@@ -1,0 +1,43 @@
+lidar_odometry:
+  ros__parameters:
+    # 使用仿真时间
+    use_sim_time: true
+
+    # Registration Type
+    # 0: Point-to-Point ICP
+    # 1: Point-to-Plane ICP (NICP)
+    # 2: GICP
+    # 3: NDT
+    registration_type: 2  # Default: GICP
+    
+    # Solver Type
+    # 0: Ceres
+    # 1: GTSAM_SE3
+    # 2: GTSAM_SO3_R3
+    # 3: GN (Gauss-Newton)
+    # 4: PCL
+    # 5: Koide
+    solve_type: 5  # Default: Koide
+    
+    # Registration Parameters
+    max_correspondence_distance: 1.0  # meters
+    max_iterations: 30
+    translation_epsilon: 0.001
+    rotation_epsilon: 0.001
+    
+    # NDT Specific Parameters
+    resolution: 1.0  # Grid resolution
+    
+    # Multi-threading Parameters
+    num_threads: 4
+    
+    # Point Cloud Pre-processing
+    downsample_leaf_size: 0.1  # meters
+    
+    # Debug Options
+    verbose: false
+
+    lidar_topic: "/sensing/lidar/top/rectified/pointcloud"
+    output_odom_topic: "/output_odom"
+    output_path_topic: "/output_path"
+    output_cloud_topic: "/output_cloud"

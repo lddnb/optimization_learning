@@ -1,8 +1,8 @@
 /**
  * @ Author: lddnb
  * @ Create Time: 2024-12-13 14:47:47
- * @ Modified by: Your name
- * @ Modified time: 2025-01-01 18:58:13
+ * @ Modified by: lddnb
+ * @ Modified time: 2025-01-02 11:47:22
  * @ Description:
  */
 
@@ -641,7 +641,7 @@ public:
         P2PICP_PCL<PointT>(this->source_cloud_, this->target_cloud_, result_pose, num_iterations, this->config_);
         break;
       }
-      case RegistrationConfig::small_gicp: {
+      case RegistrationConfig::Koide: {
         P2PICP_small_gicp<PointT>(this->source_cloud_, this->target_cloud_, result_pose, num_iterations, this->config_);
         break;
       }

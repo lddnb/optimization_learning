@@ -1,8 +1,8 @@
 /**
  * @ Author: lddnb
  * @ Create Time: 2024-12-19 15:04:38
- * @ Modified by: Your name
- * @ Modified time: 2025-01-01 18:58:55
+ * @ Modified by: lddnb
+ * @ Modified time: 2025-01-02 11:47:52
  * @ Description:
  */
 
@@ -737,7 +737,7 @@ public:
         P2PlaneICP_PCL<PointT>(this->source_cloud_, this->target_cloud_, result_pose, num_iterations, this->config_);
         break;
       }
-      case RegistrationConfig::small_gicp: {
+      case RegistrationConfig::Koide: {
         P2PlaneICP_small_gicp<PointT>(this->source_cloud_, this->target_cloud_, result_pose, num_iterations, this->config_);
         break;
       }
