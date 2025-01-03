@@ -32,7 +32,7 @@ lidar_odometry:
     num_threads: 4
     
     # Point Cloud Pre-processing
-    downsample_leaf_size: 0.1  # meters
+    downsample_leaf_size: 0.4  # meters
     
     # Debug Options
     verbose: false

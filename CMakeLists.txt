@@ -127,6 +127,25 @@ if (BUILD_TESTING)
     small_gicp
     ndt_omp
   )
+
+  ament_add_gtest(downsampling_test test/downsampling_test.cpp)
+  ament_target_dependencies(downsampling_test
+    rclcpp
+  )
+  target_link_libraries(downsampling_test
+    ${PCL_LIBRARIES}
+    glog::glog
+    small_gicp
+  )
+
+  ament_add_gtest(transformcloud_test test/transformcloud_test.cpp)
+  ament_target_dependencies(transformcloud_test
+    rclcpp
+  )
+  target_link_libraries(transformcloud_test
+    ${PCL_LIBRARIES}
+    glog::glog
+  )
 endif()
 
 if (BUILD_BENCHMARKING)
@@ -153,7 +172,22 @@ if (BUILD_BENCHMARKING)
     benchmark::benchmark
   )
 
-  install(TARGETS registration_benchmark parallel_benchmark
+  add_executable(downsampling_benchmark benchmark/downsampling_benchmark.cpp)
+  target_link_libraries(downsampling_benchmark
+    ${PCL_LIBRARIES}
+    glog::glog
+    small_gicp
+    benchmark::benchmark
+  )
+
+  add_executable(transformcloud_benchmark benchmark/transformcloud_benchmark.cpp)
+  target_link_libraries(transformcloud_benchmark
+    ${PCL_LIBRARIES}
+    glog::glog
+    benchmark::benchmark
+  )
+
+  install(TARGETS registration_benchmark parallel_benchmark downsampling_benchmark transformcloud_benchmark
     DESTINATION lib/${PROJECT_NAME}
   )
 endif()

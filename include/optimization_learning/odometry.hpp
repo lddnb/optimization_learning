@@ -2,7 +2,7 @@
  * @ Author: Your name
  * @ Create Time: 1970-01-01 08:00:00
  * @ Modified by: lddnb
- * @ Modified time: 2025-01-02 17:11:46
+ * @ Modified time: 2025-01-03 10:11:53
  * @ Description:
  */
 
@@ -31,12 +31,13 @@ private:
   void CloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg);
   void PublishTF(const std_msgs::msg::Header& header);
   void PublishOdom(const std_msgs::msg::Header& header);
+  void UpdateLocalMap(const pcl::PointCloud<pcl::PointXYZI>::Ptr& msg, const Eigen::Isometry3d& pose);
   RegistrationConfig ConfigRegistration();
 
-  pcl::PointCloud<pcl::PointXYZI>::Ptr previous_cloud_;
   std::unique_ptr<RegistrationBase<pcl::PointXYZI>> registration;
   Eigen::Isometry3d current_pose_;
   pcl::VoxelGrid<pcl::PointXYZI> voxel_grid_;
+  pcl::PointCloud<pcl::PointXYZI>::Ptr local_map_;
   
   // ros
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr cloud_sub_;

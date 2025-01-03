@@ -2,7 +2,7 @@
  * @ Author: lddnb
  * @ Create Time: 2025-01-02 09:49:18
  * @ Modified by: lddnb
- * @ Modified time: 2025-01-02 17:48:51
+ * @ Modified time: 2025-01-03 10:56:38
  * @ Description:
  */
 
@@ -122,13 +122,14 @@ void LidarOdometry::CloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr
   voxel_grid_.setInputCloud(cloud);
   voxel_grid_.filter(*downsampled_cloud);
 
-  if (previous_cloud_ == nullptr) {
-    previous_cloud_ = downsampled_cloud;
+  if (local_map_ == nullptr) {
+    local_map_.reset(new pcl::PointCloud<pcl::PointXYZI>);
+    local_map_ = downsampled_cloud;
     return;
   }
 
   registration->setInputSource(downsampled_cloud);
-  registration->setInputTarget(previous_cloud_);
+  registration->setInputTarget(local_map_);
   registration->setInitialTransformation(current_pose_);
   int iterations = 0;
   registration->align(current_pose_, iterations);
@@ -145,11 +146,32 @@ void LidarOdometry::CloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr
   cloud_msg.header.stamp = this->now();
   cloud_pub_->publish(cloud_msg);
 
-  previous_cloud_ = downsampled_cloud;
+  UpdateLocalMap(downsampled_cloud, current_pose_);
 
   auto end_time = std::chrono::high_resolution_clock::now();
   auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
   LOG(INFO) << "Elapsed time: " << duration << " ms, iterations: " << iterations;
+}
+
+void LidarOdometry::UpdateLocalMap(const pcl::PointCloud<pcl::PointXYZI>::Ptr& msg, const Eigen::Isometry3d& pose)
+{
+  static std::deque<pcl::PointCloud<pcl::PointXYZI>::Ptr> local_map_list;
+  static Eigen::Isometry3d last_key_pose = Eigen::Isometry3d::Identity();
+  local_map_list.push_back(msg);
+
+  auto delta_pose = pose * last_key_pose.inverse();
+  if (local_map_list.size() >= 10 || delta_pose.translation().norm() > 2 || Eigen::AngleAxisd(delta_pose.rotation()).angle() > 30 * M_PI / 180) {
+    local_map_.reset(new pcl::PointCloud<pcl::PointXYZI>);
+    for (const auto& cloud : local_map_list) {
+      *local_map_ += *cloud;
+    }
+    LOG(INFO) << "Update local map size: " << local_map_list.size();
+    local_map_list.clear();
+    last_key_pose = pose;
+    return;
+  }
+
+  *local_map_ += *msg;
 }
 
 void LidarOdometry::PublishTF(const std_msgs::msg::Header& header)
