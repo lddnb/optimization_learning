@@ -1,3 +1,13 @@
+/**
+ * @file parallel_benchmark.cpp
+ * @author lddnb (lz750126471@gmail.com)
+ * @brief 
+ * @version 0.1
+ * @date 2025-01-05
+ * 
+ * @copyright Copyright (c) 2025
+ * 
+ */
 #include <benchmark/benchmark.h>
 #include <glog/logging.h>
 #include <pcl/io/pcd_io.h>

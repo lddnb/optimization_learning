@@ -1,9 +1,12 @@
 /**
- * @ Author: lddnb
- * @ Create Time: 2024-12-23 17:58:13
- * @ Modified by: lddnb
- * @ Modified time: 2024-12-31 15:57:40
- * @ Description:
+ * @file common.hpp
+ * @author lddnb (lz750126471@gmail.com)
+ * @brief 
+ * @version 0.1
+ * @date 2025-01-05
+ * 
+ * @copyright Copyright (c) 2025
+ * 
  */
 
 #pragma once

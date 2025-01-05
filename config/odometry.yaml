@@ -37,7 +37,14 @@ lidar_odometry:
     # Debug Options
     verbose: false
 
-    lidar_topic: "/sensing/lidar/top/rectified/pointcloud"
+    # ROS
+    lidar_topic: "/sensing/lidar/top/rectified/pointcloud"  # /kitti/velo
     output_odom_topic: "/output_odom"
     output_path_topic: "/output_path"
     output_cloud_topic: "/output_cloud"
+
+    # local map
+    local_map_min_frame_size: 3
+    update_frame_size: 10
+    update_translation_delta: 2.0
+    update_rotation_delta: 30.0

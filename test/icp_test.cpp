@@ -1,11 +1,13 @@
 /**
- * @ Author: lddnb
- * @ Create Time: 2024-12-18 17:28:38
- * @ Modified by: lddnb
- * @ Modified time: 2024-12-19 10:42:03
- * @ Description:
+ * @file icp_test.cpp
+ * @author lddnb (lz750126471@gmail.com)
+ * @brief 
+ * @version 0.1
+ * @date 2025-01-05
+ * 
+ * @copyright Copyright (c) 2025
+ * 
  */
-
 #include <gtest/gtest.h>
 #include <optimization_learning/icp.hpp>
 

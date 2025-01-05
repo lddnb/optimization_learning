@@ -1,9 +1,12 @@
 /**
- * @ Author: lddnb
- * @ Create Time: 2024-12-24 11:35:43
- * @ Modified by: lddnb
- * @ Modified time: 2025-01-02 11:49:33
- * @ Description:
+ * @file registration_test.cpp
+ * @author lddnb (lz750126471@gmail.com)
+ * @brief 
+ * @version 0.1
+ * @date 2025-01-05
+ * 
+ * @copyright Copyright (c) 2025
+ * 
  */
 
 #include <gtest/gtest.h>

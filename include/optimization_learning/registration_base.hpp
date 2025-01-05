@@ -1,9 +1,12 @@
 /**
- * @ Author: Your name
- * @ Create Time: 1970-01-01 08:00:00
- * @ Modified by: lddnb
- * @ Modified time: 2025-01-02 11:47:01
- * @ Description:
+ * @file registration_base.hpp
+ * @author lddnb (lz750126471@gmail.com)
+ * @brief 
+ * @version 0.1
+ * @date 2025-01-05
+ * 
+ * @copyright Copyright (c) 2025
+ * 
  */
 
 #pragma once

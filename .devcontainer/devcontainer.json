@@ -17,7 +17,9 @@
     // "--env", "LD_LIBRARY_PATH=/usr/lib/wsl/lib",
     // "--env", "WAYLAND_DISPLAY=$WAYLAND_DISPLAY",
     // "--device", "/dev/dri:/dev/dri",
-    // "--device", "/dev/dxg:/dev/dxg"
+    // "--device", "/dev/dxg:/dev/dxg",
+    // "--ipc=host",
+    // "--pid=host"
     // ==============================
   ],
   "customizations": {
@@ -31,7 +33,8 @@
         "aaron-bond.better-comments",
         "llvm-vs-code-extensions.vscode-clangd",
         "xaver.clang-format",
-        "ms-azuretools.vscode-docker"
+        "ms-azuretools.vscode-docker",
+        "cschlosser.doxdocgen"
       ],
       "settings": {
         "terminal.integrated.defaultProfile.linux": "zsh",
@@ -43,7 +46,9 @@
           "--compile-commands-dir=/home/ubuntu/ros_ws/build"
         ],
         "clangd.checkUpdates": true,
-        "clang-format.language.apex.style": "/home/ubuntu/ros_ws/src/optimization_learning/.clang-format"
+        "clang-format.language.apex.style": "/home/ubuntu/ros_ws/src/optimization_learning/.clang-format",
+        "doxdocgen.generic.authorName": "lddnb",
+        "doxdocgen.generic.authorEmail": "lz750126471@gmail.com"
       }
     }
   },
@@ -62,7 +67,8 @@
   //   "source=/tmp/.X11-unix,target=/tmp/.X11-unix,type=bind,consistency=cached",
   //   "source=/home/xx/.ssh,target=/home/ubuntu/.ssh,type=bind,readonly",
   //   "source=/mnt/wslg,target=/mnt/wslg,type=bind,consistency=cached",
-  //   "source=/usr/lib/wsl,target=/usr/lib/wsl,type=bind,consistency=cached"
+  //   "source=/usr/lib/wsl,target=/usr/lib/wsl,type=bind,consistency=cached",
+  //   "source=/home/xx/win,target=/home/ubuntu/win,type=bind,consistency=cached"
   // ],
   // ==============================
   "workspaceMount": "source=${localWorkspaceFolder},target=/home/ubuntu/ros_ws/src/${localWorkspaceFolderBasename},type=bind",

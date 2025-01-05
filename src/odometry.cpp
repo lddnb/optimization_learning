@@ -1,11 +1,13 @@
 /**
- * @ Author: lddnb
- * @ Create Time: 2025-01-02 09:49:18
- * @ Modified by: lddnb
- * @ Modified time: 2025-01-03 10:56:38
- * @ Description:
+ * @file odometry.cpp
+ * @author lddnb (lz750126471@gmail.com)
+ * @brief 
+ * @version 0.1
+ * @date 2025-01-05
+ * 
+ * @copyright Copyright (c) 2025
+ * 
  */
-
 #include "optimization_learning/odometry.hpp"
 
 LidarOdometry::LidarOdometry() : Node("lidar_odometry")
@@ -30,6 +32,22 @@ LidarOdometry::LidarOdometry() : Node("lidar_odometry")
   const auto odom_topic = this->get_parameter("output_odom_topic").as_string();
   const auto path_topic = this->get_parameter("output_path_topic").as_string();
   const auto cloud_topic = this->get_parameter("output_cloud_topic").as_string();
+  LOG(INFO) << "[cfg] lidar_topic: " << lidar_topic;
+
+  this->declare_parameter("local_map_min_frame_size", 3);
+  this->declare_parameter("update_frame_size", 10);
+  this->declare_parameter("update_translation_delta", 2.0);
+  this->declare_parameter("update_rotation_delta", 30.0);
+  local_map_min_frame_size_ = this->get_parameter("local_map_min_frame_size").as_int();
+  update_frame_size_ = this->get_parameter("update_frame_size").as_int();
+  update_translation_delta_ = this->get_parameter("update_translation_delta").as_double();
+  update_rotation_delta_ = this->get_parameter("update_rotation_delta").as_double();
+  LOG(INFO) << "[cfg] local_map_min_frame_size: " << local_map_min_frame_size_;
+  LOG(INFO) << "[cfg] update_frame_size: " << update_frame_size_;
+  LOG(INFO) << "[cfg] update_translation_delta: " << update_translation_delta_;
+  LOG(INFO) << "[cfg] update_rotation_delta: " << update_rotation_delta_;
+  update_rotation_delta_ = update_rotation_delta_ * M_PI / 180;
+
   cloud_sub_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
     lidar_topic, qos,
     std::bind(&LidarOdometry::CloudCallback, this, std::placeholders::_1));
@@ -160,7 +178,11 @@ void LidarOdometry::UpdateLocalMap(const pcl::PointCloud<pcl::PointXYZI>::Ptr& m
   local_map_list.push_back(msg);
 
   auto delta_pose = pose * last_key_pose.inverse();
-  if (local_map_list.size() >= 10 || delta_pose.translation().norm() > 2 || Eigen::AngleAxisd(delta_pose.rotation()).angle() > 30 * M_PI / 180) {
+  if (
+    local_map_list.size() >= local_map_min_frame_size_ &&
+    (local_map_list.size() >= update_frame_size_ ||
+     delta_pose.translation().norm() > update_translation_delta_ ||
+     Eigen::AngleAxisd(delta_pose.rotation()).angle() > update_rotation_delta_)) {
     local_map_.reset(new pcl::PointCloud<pcl::PointXYZI>);
     for (const auto& cloud : local_map_list) {
       *local_map_ += *cloud;

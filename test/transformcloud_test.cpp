@@ -1,11 +1,13 @@
 /**
- * @ Author: lddnb
- * @ Create Time: 2024-12-24 11:35:43
- * @ Modified by: lddnb
- * @ Modified time: 2025-01-03 18:24:13
- * @ Description: Test for point cloud transformation
+ * @file transformcloud_test.cpp
+ * @author lddnb (lz750126471@gmail.com)
+ * @brief 
+ * @version 0.1
+ * @date 2025-01-05
+ * 
+ * @copyright Copyright (c) 2025
+ * 
  */
-
 #include <gtest/gtest.h>
 #include <glog/logging.h>
 #include <pcl/io/pcd_io.h>

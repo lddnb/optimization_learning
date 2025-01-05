@@ -1,9 +1,12 @@
 /**
- * @ Author: Your name
- * @ Create Time: 1970-01-01 08:00:00
- * @ Modified by: lddnb
- * @ Modified time: 2025-01-03 10:11:53
- * @ Description:
+ * @file odometry.hpp
+ * @author lddnb (lz750126471@gmail.com)
+ * @brief 
+ * @version 0.1
+ * @date 2025-01-05
+ * 
+ * @copyright Copyright (c) 2025
+ * 
  */
 
 #pragma once
@@ -47,4 +50,10 @@ private:
   std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
   std::string lidar_frame_;
   nav_msgs::msg::Path path_;
+
+  // local map config
+  int local_map_min_frame_size_;
+  int update_frame_size_;
+  double update_translation_delta_;
+  double update_rotation_delta_;
 };
