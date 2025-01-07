@@ -38,7 +38,8 @@ lidar_odometry:
     verbose: false
 
     # ROS
-    lidar_topic: "/sensing/lidar/top/rectified/pointcloud"  # /kitti/velo
+    lidar_topic: "/kitti/velo"  # /sensing/lidar/top/rectified/pointcloud
+    ground_truth_path_topic: "/kitti/ground_truth"
     output_odom_topic: "/output_odom"
     output_path_topic: "/output_path"
     output_cloud_topic: "/output_cloud"
@@ -48,3 +49,6 @@ lidar_odometry:
     update_frame_size: 10
     update_translation_delta: 2.0
     update_rotation_delta: 30.0
+
+    # save map
+    save_map_path: "/home/ubuntu/ros_ws/src/optimization_learning/map"

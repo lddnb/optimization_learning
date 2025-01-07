@@ -159,7 +159,7 @@ Visualization Manager:
         All Enabled: true
         map:
           Value: true
-        velodyne_top:
+        velo_link:
           Value: true
       Marker Scale: 1
       Name: TF
@@ -168,7 +168,7 @@ Visualization Manager:
       Show Names: false
       Tree:
         map:
-          velodyne_top:
+          velo_link:
             {}
       Update Interval: 0
       Value: true
@@ -183,13 +183,13 @@ Visualization Manager:
       Class: rviz_default_plugins/PointCloud2
       Color: 255; 255; 255
       Color Transformer: Intensity
-      Decay Time: 999
+      Decay Time: 50
       Enabled: true
       Invert Rainbow: false
       Max Color: 255; 255; 255
-      Max Intensity: 6428
+      Max Intensity: 0.9599999785423279
       Min Color: 0; 0; 0
-      Min Intensity: 3
+      Min Intensity: 0
       Name: PointCloud2
       Position Transformer: XYZ
       Selectable: true
@@ -204,6 +204,34 @@ Visualization Manager:
         Value: /output_cloud
       Use Fixed Frame: true
       Use rainbow: true
+      Value: true
+    - Alpha: 1
+      Buffer Length: 1
+      Class: rviz_default_plugins/Path
+      Color: 255; 0; 0
+      Enabled: true
+      Head Diameter: 0.30000001192092896
+      Head Length: 0.20000000298023224
+      Length: 0.30000001192092896
+      Line Style: Lines
+      Line Width: 0.029999999329447746
+      Name: Path
+      Offset:
+        X: 0
+        Y: 0
+        Z: 0
+      Pose Color: 255; 85; 255
+      Pose Style: None
+      Radius: 0.029999999329447746
+      Shaft Diameter: 0.10000000149011612
+      Shaft Length: 0.10000000149011612
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /kitti/ground_truth
       Value: true
   Enabled: true
   Global Options:
@@ -266,10 +294,10 @@ Visualization Manager:
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 0.3703983724117279
+      Pitch: 0.4503982961177826
       Target Frame: <Fixed Frame>
       Value: Orbit (rviz)
-      Yaw: 2.9454007148742676
+      Yaw: 2.9604008197784424
     Saved: ~
 Window Geometry:
   Displays:

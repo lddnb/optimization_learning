@@ -70,7 +70,8 @@ RUN apt-get update && \
     libceres-dev \
     libfmt-dev \
     ros-jazzy-desktop-full \
-    ros-jazzy-gtsam
+    ros-jazzy-gtsam \
+    python3-pip
 
 # 清除apt缓存
 RUN apt autoremove -y \
@@ -95,4 +96,5 @@ RUN echo 'ENABLE_CORRECTION="true"' >> ~/.zshrc
 RUN echo 'COMPLETION_WAITING_DOTS="true"' >> ~/.zshrc
 RUN echo 'alias sss="source devel/setup.zsh"' >> ~/.zshrc
 RUN echo 'alias sis="source install/setup.zsh"' >> ~/.zshrc
+RUN echo 'export PATH=$PATH:~/.local/bin' >> ~/.zshrc
 RUN echo source "/opt/ros/jazzy/setup.zsh" >> ~/.zshrc

@@ -7,6 +7,10 @@ Dependencies
 - Ceres 2.2.0
 - GTSAM 4.2.0
 - OpenCV 4.6.0
+- evo
+  ```bash
+  pip install evo --break-system-packages
+  ```
 
 
 

@@ -23,34 +23,33 @@ LidarOdometry::LidarOdometry() : Node("lidar_odometry")
   qos.keep_last(10);
 
   // 创建订阅者和发布者
-
-  this->declare_parameter("lidar_topic", "/sensing/lidar/top/rectified/pointcloud");
-  this->declare_parameter("output_odom_topic", "/output_odom");
-  this->declare_parameter("output_path_topic", "/output_path");
-  this->declare_parameter("output_cloud_topic", "/output_cloud");
-  const auto lidar_topic = this->get_parameter("lidar_topic").as_string();
-  const auto odom_topic = this->get_parameter("output_odom_topic").as_string();
-  const auto path_topic = this->get_parameter("output_path_topic").as_string();
-  const auto cloud_topic = this->get_parameter("output_cloud_topic").as_string();
+  const auto lidar_topic = this->declare_parameter("lidar_topic", std::string());
+  const auto ground_truth_path_topic = this->declare_parameter("ground_truth_path_topic", std::string());
+  const auto odom_topic = this->declare_parameter("output_odom_topic", std::string());
+  const auto path_topic = this->declare_parameter("output_path_topic", std::string());
+  const auto cloud_topic = this->declare_parameter("output_cloud_topic", std::string());
   LOG(INFO) << "[cfg] lidar_topic: " << lidar_topic;
+  LOG(INFO) << "[cfg] ground_truth_path_topic: " << ground_truth_path_topic;
 
-  this->declare_parameter("local_map_min_frame_size", 3);
-  this->declare_parameter("update_frame_size", 10);
-  this->declare_parameter("update_translation_delta", 2.0);
-  this->declare_parameter("update_rotation_delta", 30.0);
-  local_map_min_frame_size_ = this->get_parameter("local_map_min_frame_size").as_int();
-  update_frame_size_ = this->get_parameter("update_frame_size").as_int();
-  update_translation_delta_ = this->get_parameter("update_translation_delta").as_double();
-  update_rotation_delta_ = this->get_parameter("update_rotation_delta").as_double();
+  local_map_min_frame_size_ = this->declare_parameter("local_map_min_frame_size", int(0));
+  update_frame_size_ = this->declare_parameter("update_frame_size", int(0));
+  update_translation_delta_ = this->declare_parameter("update_translation_delta", double(0.0));
+  update_rotation_delta_ = this->declare_parameter("update_rotation_delta", double(0.0));
   LOG(INFO) << "[cfg] local_map_min_frame_size: " << local_map_min_frame_size_;
   LOG(INFO) << "[cfg] update_frame_size: " << update_frame_size_;
   LOG(INFO) << "[cfg] update_translation_delta: " << update_translation_delta_;
   LOG(INFO) << "[cfg] update_rotation_delta: " << update_rotation_delta_;
   update_rotation_delta_ = update_rotation_delta_ * M_PI / 180;
 
+  save_map_path_ = this->declare_parameter("save_map_path", std::string());
+  LOG(INFO) << "[cfg] save_map_path: " << save_map_path_;
+
   cloud_sub_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
     lidar_topic, qos,
     std::bind(&LidarOdometry::CloudCallback, this, std::placeholders::_1));
+  ground_truth_path_sub_ = this->create_subscription<nav_msgs::msg::Path>(
+    ground_truth_path_topic, qos,
+    std::bind(&LidarOdometry::GroundTruthPathCallback, this, std::placeholders::_1));
   odom_pub_ = this->create_publisher<nav_msgs::msg::Odometry>(odom_topic, 10);
   path_pub_ = this->create_publisher<nav_msgs::msg::Path>(path_topic, 10);
   cloud_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(cloud_topic, 10);
@@ -62,36 +61,27 @@ LidarOdometry::LidarOdometry() : Node("lidar_odometry")
   tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(this);
 }
 
-LidarOdometry::~LidarOdometry() {}
+LidarOdometry::~LidarOdometry()
+{
+  SaveMappingResult();
+}
 
 RegistrationConfig LidarOdometry::ConfigRegistration()
 {
-  // 声明并获取参数
-  this->declare_parameter("registration_type", 3);  // Default: NDT
-  this->declare_parameter("solve_type", 5);        // Default: OMP
-  this->declare_parameter("max_correspondence_distance", 1.0);
-  this->declare_parameter("max_iterations", 30);
-  this->declare_parameter("translation_epsilon", 0.01);
-  this->declare_parameter("rotation_epsilon", 0.01);
-  this->declare_parameter("resolution", 1.0);
-  this->declare_parameter("num_threads", 4);
-  this->declare_parameter("downsample_leaf_size", 0.1);
-  this->declare_parameter("verbose", false);
-
   // 读取参数
   RegistrationConfig reg_config;
   reg_config.registration_type = static_cast<RegistrationConfig::RegistrationType>(
-    this->get_parameter("registration_type").as_int());
+    this->declare_parameter("registration_type", int(0)));
   reg_config.solve_type = static_cast<RegistrationConfig::SolveType>(
-    this->get_parameter("solve_type").as_int());
-  reg_config.max_correspondence_distance = this->get_parameter("max_correspondence_distance").as_double();
-  reg_config.max_iterations = this->get_parameter("max_iterations").as_int();
-  reg_config.translation_eps = this->get_parameter("translation_epsilon").as_double();
-  reg_config.rotation_eps = this->get_parameter("rotation_epsilon").as_double();
-  reg_config.resolution = this->get_parameter("resolution").as_double();
-  reg_config.num_threads = this->get_parameter("num_threads").as_int();
-  reg_config.verbose = this->get_parameter("verbose").as_bool();
-  reg_config.downsample_leaf_size = this->get_parameter("downsample_leaf_size").as_double();
+    this->declare_parameter("solve_type", int(0)));
+  reg_config.max_correspondence_distance = this->declare_parameter("max_correspondence_distance", double(0.0));
+  reg_config.max_iterations = this->declare_parameter("max_iterations", int(0));
+  reg_config.translation_eps = this->declare_parameter("translation_epsilon", double(0.0));
+  reg_config.rotation_eps = this->declare_parameter("rotation_epsilon", double(0.0));
+  reg_config.resolution = this->declare_parameter("resolution", double(0.0));
+  reg_config.num_threads = this->declare_parameter("num_threads", int(0));
+  reg_config.verbose = this->declare_parameter("verbose", bool(false));
+  reg_config.downsample_leaf_size = this->declare_parameter("downsample_leaf_size", double(0.0));
 
   // 创建配准对象
   switch (reg_config.registration_type) {
@@ -125,6 +115,25 @@ RegistrationConfig LidarOdometry::ConfigRegistration()
   return reg_config;
 }
 
+void LidarOdometry::SaveMappingResult()
+{
+  // 保存TUM格式
+  std::ofstream file(save_map_path_ + "/gt_trajectory.txt");
+  for (const auto& pose : ground_truth_path_.poses) {
+    std::string timestamp = std::to_string(pose.header.stamp.sec) + "." + std::to_string(pose.header.stamp.nanosec);
+    file << timestamp << " " << pose.pose.position.x << " " << pose.pose.position.y << " " << pose.pose.position.z << " " << pose.pose.orientation.x << " " << pose.pose.orientation.y << " " << pose.pose.orientation.z << " " << pose.pose.orientation.w << std::endl;
+  }
+  file.close();
+
+  file.open(save_map_path_ + "/mapping_trajectory.txt");
+  for (const auto& pose : path_.poses) {
+    std::string timestamp = std::to_string(pose.header.stamp.sec) + "." + std::to_string(pose.header.stamp.nanosec);
+    file << timestamp << " " << pose.pose.position.x << " " << pose.pose.position.y << " " << pose.pose.position.z << " " << pose.pose.orientation.x << " " << pose.pose.orientation.y << " " << pose.pose.orientation.z << " " << pose.pose.orientation.w << std::endl;
+  }
+  file.close();
+  LOG(INFO) << "Save mapping result to " << save_map_path_;
+}
+
 void LidarOdometry::CloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg)
 {
   auto start_time = std::chrono::high_resolution_clock::now();
@@ -143,6 +152,8 @@ void LidarOdometry::CloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr
   if (local_map_ == nullptr) {
     local_map_.reset(new pcl::PointCloud<pcl::PointXYZI>);
     local_map_ = downsampled_cloud;
+    PublishTF(msg->header);
+    PublishOdom(msg->header);
     return;
   }
 
@@ -169,6 +180,11 @@ void LidarOdometry::CloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr
   auto end_time = std::chrono::high_resolution_clock::now();
   auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
   LOG(INFO) << "Elapsed time: " << duration << " ms, iterations: " << iterations;
+}
+
+void LidarOdometry::GroundTruthPathCallback(const nav_msgs::msg::Path::SharedPtr msg)
+{
+  ground_truth_path_ = *msg;
 }
 
 void LidarOdometry::UpdateLocalMap(const pcl::PointCloud<pcl::PointXYZI>::Ptr& msg, const Eigen::Isometry3d& pose)
