@@ -32,3 +32,6 @@
 *.app
 
 bag
+map/*.png
+map/*.csv
+map/*.txt

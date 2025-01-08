@@ -59,6 +59,10 @@ LidarOdometry::LidarOdometry() : Node("lidar_odometry")
 
   // 初始化tf广播器
   tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(this);
+
+  // 初始化时间评估
+  downsample_time_eval_ = TimeEval("downsample");
+  registration_time_eval_ = TimeEval("registration");
 }
 
 LidarOdometry::~LidarOdometry()
@@ -132,6 +136,12 @@ void LidarOdometry::SaveMappingResult()
   }
   file.close();
   LOG(INFO) << "Save mapping result to " << save_map_path_;
+
+  std::string downsample_time_eval_path = save_map_path_ + "/" + downsample_time_eval_.GetName() + ".csv";
+  downsample_time_eval_.ExportToFile(downsample_time_eval_path);
+
+  std::string registration_time_eval_path = save_map_path_ + "/" + registration_time_eval_.GetName() + ".csv";
+  registration_time_eval_.ExportToFile(registration_time_eval_path);
 }
 
 void LidarOdometry::CloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg)
@@ -146,8 +156,10 @@ void LidarOdometry::CloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr
 
   // 下采样
   pcl::PointCloud<pcl::PointXYZI>::Ptr downsampled_cloud(new pcl::PointCloud<pcl::PointXYZI>);
+  downsample_time_eval_.tic();
   voxel_grid_.setInputCloud(cloud);
   voxel_grid_.filter(*downsampled_cloud);
+  downsample_time_eval_.toc();
 
   if (local_map_ == nullptr) {
     local_map_.reset(new pcl::PointCloud<pcl::PointXYZI>);
@@ -157,11 +169,13 @@ void LidarOdometry::CloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr
     return;
   }
 
+  registration_time_eval_.tic();
   registration->setInputSource(downsampled_cloud);
   registration->setInputTarget(local_map_);
   registration->setInitialTransformation(current_pose_);
   int iterations = 0;
   registration->align(current_pose_, iterations);
+  registration_time_eval_.toc();
 
   // 发布pose和tf
   PublishTF(msg->header);
@@ -179,7 +193,7 @@ void LidarOdometry::CloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr
 
   auto end_time = std::chrono::high_resolution_clock::now();
   auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
-  LOG(INFO) << "Elapsed time: " << duration << " ms, iterations: " << iterations;
+  // LOG(INFO) << "Elapsed time: " << duration << " ms, iterations: " << iterations;
 }
 
 void LidarOdometry::GroundTruthPathCallback(const nav_msgs::msg::Path::SharedPtr msg)

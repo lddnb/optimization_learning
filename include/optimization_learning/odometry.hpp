@@ -63,4 +63,8 @@ private:
 
   // save map
   std::string save_map_path_;
+
+  // time eval
+  TimeEval downsample_time_eval_;
+  TimeEval registration_time_eval_;
 };

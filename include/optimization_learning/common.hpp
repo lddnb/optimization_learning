@@ -12,6 +12,8 @@
 #pragma once
 
 #include <execution>
+#include <chrono>
+#include <glog/logging.h>
 #include <Eigen/Eigen>
 #include <ceres/ceres.h>
 #include <gtsam/geometry/Rot3.h>
@@ -63,3 +65,112 @@ using H_b_type = std::pair<Eigen::Matrix<double, 6, 6>, Eigen::Matrix<double, 6,
 //   viewer->updatePointCloud<pcl::PointXYZI>(source_points_transformed, "source_points_transformed");
 // }
 // next_iteration = false;
+
+
+class TimeEval
+{
+public:
+  TimeEval(const std::string& module_name = "unnamed") 
+    : module_name_(module_name), is_timing_(false) {}
+  
+  ~TimeEval() {
+    if (is_timing_) {
+      LOG(WARNING) << "Warning: Timer '" << module_name_ << "' was not stopped properly";
+    }
+  }
+
+  void tic() {
+    if (is_timing_) {
+      LOG(WARNING) << "Warning: Timer '" << module_name_ << "' was already started";
+      return;
+    }
+    start_time_ = std::chrono::high_resolution_clock::now();
+    is_timing_ = true;
+  }
+
+  void toc() {
+    if (!is_timing_) {
+      LOG(WARNING) << "Warning: Timer '" << module_name_ << "' was not started";
+      return;
+    }
+    auto end_time = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time_);
+    time_records_.push_back(duration.count() / 1000.0);  // 转换为毫秒
+    is_timing_ = false;
+  }
+
+  struct TimingSummary {
+    double avg_time;
+    double max_time;
+    double min_time;
+    double std_dev;
+    size_t count;
+  };
+
+  TimingSummary GetSummary() const {
+    if (time_records_.empty()) {
+      return {0.0, 0.0, 0.0, 0.0, 0};
+    }
+
+    double sum = std::accumulate(time_records_.begin(), time_records_.end(), 0.0);
+    double avg = sum / time_records_.size();
+    double max = *std::max_element(time_records_.begin(), time_records_.end());
+    double min = *std::min_element(time_records_.begin(), time_records_.end());
+
+    double sq_sum = std::accumulate(time_records_.begin(), time_records_.end(), 0.0,
+      [avg](double acc, double val) {
+        double diff = val - avg;
+        return acc + diff * diff;
+      });
+    double std_dev = std::sqrt(sq_sum / time_records_.size());
+
+    return {avg, max, min, std_dev, time_records_.size()};
+  }
+
+  void PrintSummary() const {
+    auto summary = GetSummary();
+    LOG(INFO) << "\nTiming Summary for '" << module_name_ << "':" << std::endl;
+    LOG(INFO) << "  Count:     " << summary.count << std::endl;
+    LOG(INFO) << "  Average:   " << std::fixed << std::setprecision(3) << summary.avg_time << " ms" << std::endl;
+    LOG(INFO) << "  Maximum:   " << summary.max_time << " ms" << std::endl;
+    LOG(INFO) << "  Minimum:   " << summary.min_time << " ms" << std::endl;
+    LOG(INFO) << "  Std Dev:   " << summary.std_dev << " ms" << std::endl;
+  }
+
+  void ExportToFile(const std::string& filename) const {
+    std::ofstream file(filename);
+    if (!file.is_open()) {
+      LOG(ERROR) << "Error: Could not open file " << filename;
+      return;
+    }
+
+    // 写入CSV头
+    file << "iteration,time_ms\n";
+
+    // 写入每次的计时数据
+    for (size_t i = 0; i < time_records_.size(); ++i) {
+      file << i << "," << std::fixed << std::setprecision(3) << time_records_[i] << "\n";
+    }
+
+    // 写入统计数据
+    auto summary = GetSummary();
+    file << "\nSummary:\n";
+    file << "count," << summary.count << "\n";
+    file << "average," << summary.avg_time << "\n";
+    file << "maximum," << summary.max_time << "\n";
+    file << "minimum," << summary.min_time << "\n";
+    file << "std_dev," << summary.std_dev << "\n";
+
+    file.close();
+  }
+
+  std::string GetName() const {
+    return module_name_;
+  }
+
+private:
+  std::string module_name_;
+  std::vector<double> time_records_;
+  std::chrono::high_resolution_clock::time_point start_time_;
+  bool is_timing_;
+};
