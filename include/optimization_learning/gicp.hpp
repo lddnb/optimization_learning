@@ -397,7 +397,11 @@ void GICP_GTSAM_SE3(
     Eigen::Isometry3d T_opt(last_T_gtsam.matrix());
     pcl::transformPointCloud(*source_cloud_ptr, *source_points_transformed, T_opt.matrix());
 
-    std::vector<GtsamGICPFactor *> cost_functors(source_points_transformed->size(), nullptr);
+    //! 这里不像ceres函数中用原始指针和new，而是用unique_ptr，是因为
+    //! Ceres中的problem.AddParameterBlock和AddResidualBlock会接管指针
+    //! cost_function 和 loss_function 会在 problem 析构时自动释放掉，所以并不会造成内存泄露的问题
+    //! gtsam中没有类似功能，方便起见，用unique_ptr
+    std::vector<std::unique_ptr<GtsamGICPFactor>> cost_functors(source_points_transformed->size());
     std::vector<int> index(source_points_transformed->size());
     std::iota(index.begin(), index.end(), 0);
 
@@ -429,7 +433,7 @@ void GICP_GTSAM_SE3(
         Eigen::Matrix3d cov_inv = cov.inverse();
 
         // 构建因子
-        cost_functors[idx] = new GtsamGICPFactor(
+        cost_functors[idx] = std::make_unique<GtsamGICPFactor>(
           key,
           source_cloud_ptr->at(idx), 
           target_cloud_ptr->at(nn_indices[0]), 
@@ -500,7 +504,7 @@ void GICP_GTSAM_SO3_R3(
     T_opt.translation() = last_t_gtsam;
     pcl::transformPointCloud(*source_cloud_ptr, *source_points_transformed, T_opt.matrix());
 
-    std::vector<GtsamGICPFactor2 *> cost_functors(source_points_transformed->size(), nullptr);
+    std::vector<std::unique_ptr<GtsamGICPFactor2>> cost_functors(source_points_transformed->size());
     std::vector<int> index(source_points_transformed->size());
     std::iota(index.begin(), index.end(), 0);
 
@@ -529,7 +533,7 @@ void GICP_GTSAM_SO3_R3(
         Eigen::Matrix3d cov_inv = cov.inverse();
 
         // 构建因子
-        cost_functors[idx] = new GtsamGICPFactor2(
+        cost_functors[idx] = std::make_unique<GtsamGICPFactor2>(
           key1, 
           key2,
           source_cloud_ptr->at(idx), 
@@ -754,6 +758,61 @@ void GICP_small_gicp(
 }
 
 template <typename PointT>
+void VGICP_small_gicp(
+  const typename pcl::PointCloud<PointT>::Ptr& source_cloud_ptr,
+  const typename pcl::PointCloud<PointT>::Ptr& target_cloud_ptr,
+  Eigen::Isometry3d& result_pose,
+  int& num_iterations,
+  const RegistrationConfig& config)
+{
+  std::vector<Eigen::Vector3d> source_eigen(source_cloud_ptr->size());
+  std::vector<Eigen::Vector3d> target_eigen(target_cloud_ptr->size());
+  std::transform(
+    std::execution::par,
+    source_cloud_ptr->begin(),
+    source_cloud_ptr->end(),
+    source_eigen.begin(),
+    [](const pcl::PointXYZI& point) { return Eigen::Vector3d(point.x, point.y, point.z); });
+  std::transform(
+    std::execution::par,
+    target_cloud_ptr->begin(),
+    target_cloud_ptr->end(),
+    target_eigen.begin(),
+    [](const pcl::PointXYZI& point) { return Eigen::Vector3d(point.x, point.y, point.z); });
+
+  auto target = std::make_shared<small_gicp::PointCloud>(target_eigen);
+  auto source = std::make_shared<small_gicp::PointCloud>(source_eigen);
+
+  // Create KdTree
+  auto target_tree = std::make_shared<small_gicp::KdTree<small_gicp::PointCloud>>(
+    target,
+    small_gicp::KdTreeBuilderOMP(config.num_threads));
+  auto source_tree = std::make_shared<small_gicp::KdTree<small_gicp::PointCloud>>(
+    source,
+    small_gicp::KdTreeBuilderOMP(config.num_threads));
+
+  // Estimate point covariances
+  estimate_covariances_omp(*target, *target_tree, config.num_neighbors, config.num_threads);
+  estimate_covariances_omp(*source, *source_tree, config.num_neighbors, config.num_threads);
+
+  auto target_voxelmap = small_gicp::create_gaussian_voxelmap(*target, 1);
+
+  small_gicp::Registration<small_gicp::GICPFactor, small_gicp::ParallelReductionOMP> registration;
+  registration.reduction.num_threads = config.num_threads;
+  registration.criteria.rotation_eps = config.rotation_eps;
+  registration.criteria.translation_eps = config.translation_eps;
+  registration.optimizer.max_iterations = config.max_iterations;
+  registration.optimizer.verbose = config.verbose;
+
+  Eigen::Isometry3d init_T_target_source(result_pose.matrix());
+  auto result = registration.align(*target_voxelmap, *source, *target_voxelmap, init_T_target_source);
+
+  result_pose = result.T_target_source;
+  num_iterations = result.iterations;
+}
+
+
+template <typename PointT>
 class GICPRegistration : public RegistrationBase<PointT>
 {
 public:
@@ -784,7 +843,7 @@ public:
         break;
       }
       case RegistrationConfig::Koide: {
-        GICP_small_gicp<PointT>(this->source_cloud_, this->target_cloud_, result_pose, num_iterations, this->config_);
+        VGICP_small_gicp<PointT>(this->source_cloud_, this->target_cloud_, result_pose, num_iterations, this->config_);
         break;
       }
       default: {

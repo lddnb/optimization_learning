@@ -9,6 +9,7 @@
  * 
  */
 #include "optimization_learning/odometry.hpp"
+#include "optimization_learning/downsampling.hpp"
 
 LidarOdometry::LidarOdometry() : Node("lidar_odometry")
 {
@@ -17,10 +18,9 @@ LidarOdometry::LidarOdometry() : Node("lidar_odometry")
   ConfigRegistration();
 
   // 设置QoS
-  rclcpp::QoS qos(10);
-  qos.best_effort();
-  qos.durability_volatile();
-  qos.keep_last(10);
+  rclcpp::SensorDataQoS qos;
+  qos.reliable();
+  qos.keep_last(100);
 
   // 创建订阅者和发布者
   const auto lidar_topic = this->declare_parameter("lidar_topic", std::string());
@@ -63,11 +63,79 @@ LidarOdometry::LidarOdometry() : Node("lidar_odometry")
   // 初始化时间评估
   downsample_time_eval_ = TimeEval("downsample");
   registration_time_eval_ = TimeEval("registration");
+  
+  main_thread_ = std::make_unique<std::thread>(&LidarOdometry::MainThread, this);
 }
 
 LidarOdometry::~LidarOdometry()
 {
   SaveMappingResult();
+  if (main_thread_ && main_thread_->joinable()) {
+    main_thread_->join();
+  }
+  main_thread_.reset();
+}
+
+void LidarOdometry::MainThread()
+{
+  while (rclcpp::ok()) {
+    if (!lidar_cloud_buffer_.empty()) {
+      auto start_time = std::chrono::high_resolution_clock::now();
+      sensor_msgs::msg::PointCloud2::SharedPtr msg;
+      {
+        std::lock_guard<std::mutex> lock(cloud_buffer_mutex_);
+        msg = lidar_cloud_buffer_.front();
+        lidar_cloud_buffer_.pop_front();
+      }
+
+      pcl::PointCloud<pcl::PointXYZI>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZI>);
+      pcl::fromROSMsg(*msg, *cloud);
+
+      // 下采样
+      pcl::PointCloud<pcl::PointXYZI>::Ptr downsampled_cloud(new pcl::PointCloud<pcl::PointXYZI>);
+      downsample_time_eval_.tic();
+      // voxel_grid_.setInputCloud(cloud);
+      // voxel_grid_.filter(*downsampled_cloud);
+      downsampled_cloud = voxelgrid_sampling_pstl<pcl::PointXYZI>(cloud, 0.4);
+      downsample_time_eval_.toc();
+
+      if (local_map_ == nullptr) {
+        local_map_.reset(new pcl::PointCloud<pcl::PointXYZI>);
+        local_map_ = downsampled_cloud;
+        PublishTF(msg->header);
+        PublishOdom(msg->header);
+        continue;
+      }
+
+      registration_time_eval_.tic();
+      registration->setInputSource(downsampled_cloud);
+      registration->setInputTarget(local_map_);
+      registration->setInitialTransformation(current_pose_);
+      int iterations = 0;
+      registration->align(current_pose_, iterations);
+      registration_time_eval_.toc();
+
+      // 发布pose和tf
+      PublishTF(msg->header);
+      PublishOdom(msg->header);
+
+      pcl::transformPointCloud(*downsampled_cloud, *downsampled_cloud, current_pose_.matrix());
+      sensor_msgs::msg::PointCloud2 cloud_msg;
+      pcl::toROSMsg(*downsampled_cloud, cloud_msg);
+      //! 记得设置 frame_id
+      cloud_msg.header.frame_id = "map";
+      cloud_msg.header.stamp = msg->header.stamp;
+      cloud_pub_->publish(cloud_msg);
+
+      UpdateLocalMap(downsampled_cloud, current_pose_);
+
+      auto end_time = std::chrono::high_resolution_clock::now();
+      auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
+      LOG(INFO) << "Elapsed time: " << duration << " ms, iterations: " << iterations;
+    } else {
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+  }
 }
 
 RegistrationConfig LidarOdometry::ConfigRegistration()
@@ -146,54 +214,32 @@ void LidarOdometry::SaveMappingResult()
 
 void LidarOdometry::CloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg)
 {
-  auto start_time = std::chrono::high_resolution_clock::now();
+  static int lidar_frame_index = 0;
+  double stamp = msg->header.stamp.sec + msg->header.stamp.nanosec / 1e9;
+  
+  // 将UTC时间戳转换为时间结构
+  time_t time_stamp = static_cast<time_t>(stamp);
+  struct tm* timeinfo = localtime(&time_stamp);
+  char buffer[80];
+  strftime(buffer, 80, "%Y-%m-%d %H:%M:%S", timeinfo);
+  
+  LOG(INFO) << "lidar_frame_index: " << lidar_frame_index++ 
+            << " with stamp: " << buffer 
+            << "." << std::setfill('0') << std::setw(9) << msg->header.stamp.nanosec;
+
   if (lidar_frame_.empty()) {
     lidar_frame_ = msg->header.frame_id;
   }
 
-  pcl::PointCloud<pcl::PointXYZI>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZI>);
-  pcl::fromROSMsg(*msg, *cloud);
-
-  // 下采样
-  pcl::PointCloud<pcl::PointXYZI>::Ptr downsampled_cloud(new pcl::PointCloud<pcl::PointXYZI>);
-  downsample_time_eval_.tic();
-  voxel_grid_.setInputCloud(cloud);
-  voxel_grid_.filter(*downsampled_cloud);
-  downsample_time_eval_.toc();
-
-  if (local_map_ == nullptr) {
-    local_map_.reset(new pcl::PointCloud<pcl::PointXYZI>);
-    local_map_ = downsampled_cloud;
-    PublishTF(msg->header);
-    PublishOdom(msg->header);
-    return;
+  {
+    std::lock_guard<std::mutex> lock(cloud_buffer_mutex_);
+    // 添加缓冲区大小限制
+    if (lidar_cloud_buffer_.size() > 1000) {
+      LOG(WARNING) << "Buffer overflow, dropping oldest data";
+      lidar_cloud_buffer_.pop_front();
+    }
+    lidar_cloud_buffer_.emplace_back(msg);
   }
-
-  registration_time_eval_.tic();
-  registration->setInputSource(downsampled_cloud);
-  registration->setInputTarget(local_map_);
-  registration->setInitialTransformation(current_pose_);
-  int iterations = 0;
-  registration->align(current_pose_, iterations);
-  registration_time_eval_.toc();
-
-  // 发布pose和tf
-  PublishTF(msg->header);
-  PublishOdom(msg->header);
-
-  pcl::transformPointCloud(*downsampled_cloud, *downsampled_cloud, current_pose_.matrix());
-  sensor_msgs::msg::PointCloud2 cloud_msg;
-  pcl::toROSMsg(*downsampled_cloud, cloud_msg);
-  //! 记得设置 frame_id
-  cloud_msg.header.frame_id = "map";
-  cloud_msg.header.stamp = this->now();
-  cloud_pub_->publish(cloud_msg);
-
-  UpdateLocalMap(downsampled_cloud, current_pose_);
-
-  auto end_time = std::chrono::high_resolution_clock::now();
-  auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
-  // LOG(INFO) << "Elapsed time: " << duration << " ms, iterations: " << iterations;
 }
 
 void LidarOdometry::GroundTruthPathCallback(const nav_msgs::msg::Path::SharedPtr msg)
@@ -284,6 +330,12 @@ void LidarOdometry::PublishOdom(const std_msgs::msg::Header& header)
 
 int main(int argc, char** argv)
 {
+  FLAGS_alsologtostderr = true;
+  FLAGS_colorlogtostderr = true;
+  // google::ParseCommandLineFlags(&argc, &argv, true);
+  google::InitGoogleLogging(argv[0]);
+  google::InstallFailureSignalHandler();
+
   rclcpp::init(argc, argv);
   rclcpp::spin(std::make_shared<LidarOdometry>());
   rclcpp::shutdown();

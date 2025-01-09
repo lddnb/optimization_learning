@@ -327,7 +327,7 @@ void P2PlaneICP_GTSAM_SE3(
     Eigen::Isometry3d T_opt(last_T_gtsam.matrix());
     pcl::transformPointCloud(*source_cloud_ptr, *source_points_transformed, T_opt.matrix());
 
-    std::vector<GtsamIcpFactorP2Plane *> cost_functors(source_points_transformed->size(), nullptr);
+    std::vector<std::unique_ptr<GtsamIcpFactorP2Plane>> cost_functors(source_points_transformed->size());
     std::vector<int> index(source_points_transformed->size());
     std::iota(index.begin(), index.end(), 0);
 
@@ -354,7 +354,7 @@ void P2PlaneICP_GTSAM_SE3(
         }
 
         // 构建因子
-        cost_functors[idx] = new GtsamIcpFactorP2Plane(
+        cost_functors[idx] = std::make_unique<GtsamIcpFactorP2Plane>(
           key, 
           source_cloud_ptr->at(idx), 
           target_cloud_ptr->at(nn_indices[0]), 
@@ -425,7 +425,7 @@ void P2PlaneICP_GTSAM_SO3_R3(
     T_opt.translation() = last_t_gtsam;
     pcl::transformPointCloud(*source_cloud_ptr, *source_points_transformed, T_opt.matrix());
 
-    std::vector<GtsamIcpFactorP2Plane2 *> cost_functors(source_points_transformed->size(), nullptr);
+    std::vector<std::unique_ptr<GtsamIcpFactorP2Plane2>> cost_functors(source_points_transformed->size());
     std::vector<int> index(source_points_transformed->size());
     std::iota(index.begin(), index.end(), 0);
 
@@ -451,7 +451,7 @@ void P2PlaneICP_GTSAM_SO3_R3(
         }
 
         // 构建因子
-        cost_functors[idx] = new GtsamIcpFactorP2Plane2(
+        cost_functors[idx] = std::make_unique<GtsamIcpFactorP2Plane2>(
           key, 
           key2,
           source_cloud_ptr->at(idx), 

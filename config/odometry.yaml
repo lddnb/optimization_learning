@@ -45,7 +45,7 @@ lidar_odometry:
     output_cloud_topic: "/output_cloud"
 
     # local map
-    local_map_min_frame_size: 3
+    local_map_min_frame_size: 5
     update_frame_size: 10
     update_translation_delta: 2.0
     update_rotation_delta: 30.0

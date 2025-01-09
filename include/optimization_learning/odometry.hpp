@@ -11,6 +11,8 @@
 
 #pragma once
 
+#include <thread>
+
 #include <rclcpp/rclcpp.hpp>
 #include <tf2_ros/transform_broadcaster.h>
 #include <sensor_msgs/msg/point_cloud2.hpp>
@@ -38,6 +40,8 @@ private:
   void UpdateLocalMap(const pcl::PointCloud<pcl::PointXYZI>::Ptr& msg, const Eigen::Isometry3d& pose);
   void SaveMappingResult();
   RegistrationConfig ConfigRegistration();
+
+  void MainThread();
 
   std::unique_ptr<RegistrationBase<pcl::PointXYZI>> registration;
   Eigen::Isometry3d current_pose_;
@@ -67,4 +71,11 @@ private:
   // time eval
   TimeEval downsample_time_eval_;
   TimeEval registration_time_eval_;
+
+  // thread
+  std::unique_ptr<std::thread> main_thread_;
+  std::mutex cloud_buffer_mutex_;
+
+  std::deque<sensor_msgs::msg::PointCloud2::SharedPtr> lidar_cloud_buffer_;
+
 };

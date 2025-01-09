@@ -403,7 +403,7 @@ void P2PICP_GTSAM_SE3(
     Eigen::Isometry3d T_opt(last_T_gtsam.matrix());
     pcl::transformPointCloud(*source_cloud_ptr, *source_points_transformed, T_opt.matrix());
 
-    std::vector<GtsamIcpFactor*> cost_functors(source_points_transformed->size(), nullptr);
+    std::vector<std::unique_ptr<GtsamIcpFactor>> cost_functors(source_points_transformed->size());
     std::vector<int> index(source_points_transformed->size());
     std::iota(index.begin(), index.end(), 0);
 
@@ -421,7 +421,7 @@ void P2PICP_GTSAM_SE3(
           return;
         }
 
-        cost_functors[idx] = new GtsamIcpFactor(
+        cost_functors[idx] = std::make_unique<GtsamIcpFactor>(
           key, 
           source_cloud_ptr->at(idx), 
           target_cloud_ptr->at(nn_indices[0]), 
@@ -485,7 +485,7 @@ void P2PICP_GTSAM_SO3_R3(
     T_opt.translation() = last_t_gtsam;
     pcl::transformPointCloud(*source_cloud_ptr, *source_points_transformed, T_opt.matrix());
 
-    std::vector<GtsamIcpFactor2*> cost_functors(source_points_transformed->size(), nullptr);
+    std::vector<std::unique_ptr<GtsamIcpFactor2>> cost_functors(source_points_transformed->size());
     std::vector<int> index(source_points_transformed->size());
     std::iota(index.begin(), index.end(), 0);
 
@@ -503,7 +503,7 @@ void P2PICP_GTSAM_SO3_R3(
           return;
         }
 
-        cost_functors[idx] = new GtsamIcpFactor2(
+        cost_functors[idx] = std::make_unique<GtsamIcpFactor2>(
           key,
           key2,
           source_cloud_ptr->at(idx),
