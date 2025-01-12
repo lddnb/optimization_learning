@@ -1,28 +1,28 @@
-kitti/velo:
+/kitti/velo:
   reliability: reliable
   durability: volatile
   history: keep_last
   depth: 100
 
-kitti/oxts/imu:
+/kitti/oxts/imu:
   reliability: reliable
   durability: volatile
   history: keep_last
   depth: 100
 
-kitti/oxts/gps/vel:
+/kitti/oxts/gps/vel:
   reliability: reliable
   durability: volatile
   history: keep_last
   depth: 100
 
-kitti/oxts/gps/fix:
+/kitti/oxts/gps/fix:
   reliability: reliable
   durability: volatile
   history: keep_last
   depth: 100
 
-kitti/ground_truth:
+/kitti/ground_truth:
   reliability: reliable
   durability: volatile
   history: keep_last

@@ -24,11 +24,13 @@ LidarOdometry::LidarOdometry() : Node("lidar_odometry")
 
   // 创建订阅者和发布者
   const auto lidar_topic = this->declare_parameter("lidar_topic", std::string());
+  const auto imu_topic = this->declare_parameter("imu_topic", std::string());
   const auto ground_truth_path_topic = this->declare_parameter("ground_truth_path_topic", std::string());
   const auto odom_topic = this->declare_parameter("output_odom_topic", std::string());
   const auto path_topic = this->declare_parameter("output_path_topic", std::string());
   const auto cloud_topic = this->declare_parameter("output_cloud_topic", std::string());
   LOG(INFO) << "[cfg] lidar_topic: " << lidar_topic;
+  LOG(INFO) << "[cfg] imu_topic: " << imu_topic;
   LOG(INFO) << "[cfg] ground_truth_path_topic: " << ground_truth_path_topic;
 
   local_map_min_frame_size_ = this->declare_parameter("local_map_min_frame_size", int(0));
@@ -47,6 +49,9 @@ LidarOdometry::LidarOdometry() : Node("lidar_odometry")
   cloud_sub_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
     lidar_topic, qos,
     std::bind(&LidarOdometry::CloudCallback, this, std::placeholders::_1));
+  imu_sub_ = this->create_subscription<sensor_msgs::msg::Imu>(
+    imu_topic, qos,
+    std::bind(&LidarOdometry::ImuCallback, this, std::placeholders::_1));
   ground_truth_path_sub_ = this->create_subscription<nav_msgs::msg::Path>(
     ground_truth_path_topic, qos,
     std::bind(&LidarOdometry::GroundTruthPathCallback, this, std::placeholders::_1));
@@ -59,6 +64,9 @@ LidarOdometry::LidarOdometry() : Node("lidar_odometry")
 
   // 初始化tf广播器
   tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(this);
+
+  imu_integration_ = std::make_unique<ImuIntegration>();
+  imu_integration_->SetBias(Eigen::Vector3d(0.0001, 0.0001, 0.0001), Eigen::Vector3d(0.0001, 0.0001, 0.0001));
 
   // 初始化时间评估
   downsample_time_eval_ = TimeEval("downsample");
@@ -78,18 +86,14 @@ LidarOdometry::~LidarOdometry()
 
 void LidarOdometry::MainThread()
 {
+  static sensor_msgs::msg::PointCloud2::SharedPtr current_cloud_buffer = nullptr;
+  static std::deque<sensor_msgs::msg::Imu::SharedPtr> current_imu_buffer;
   while (rclcpp::ok()) {
-    if (!lidar_cloud_buffer_.empty()) {
+    if (GetSyncedData(current_cloud_buffer, current_imu_buffer)) {
+      LOG_FIRST_N(INFO, 10) << "Get synced data, imu size: " << current_imu_buffer.size();
       auto start_time = std::chrono::high_resolution_clock::now();
-      sensor_msgs::msg::PointCloud2::SharedPtr msg;
-      {
-        std::lock_guard<std::mutex> lock(cloud_buffer_mutex_);
-        msg = lidar_cloud_buffer_.front();
-        lidar_cloud_buffer_.pop_front();
-      }
-
       pcl::PointCloud<pcl::PointXYZI>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZI>);
-      pcl::fromROSMsg(*msg, *cloud);
+      pcl::fromROSMsg(*current_cloud_buffer, *cloud);
 
       // 下采样
       pcl::PointCloud<pcl::PointXYZI>::Ptr downsampled_cloud(new pcl::PointCloud<pcl::PointXYZI>);
@@ -102,11 +106,16 @@ void LidarOdometry::MainThread()
       if (local_map_ == nullptr) {
         local_map_.reset(new pcl::PointCloud<pcl::PointXYZI>);
         local_map_ = downsampled_cloud;
-        PublishTF(msg->header);
-        PublishOdom(msg->header);
+        PublishTF(current_cloud_buffer->header);
+        PublishOdom(current_cloud_buffer->header);
         continue;
       }
-
+      imu_integration_->UpdatePose(current_pose_);
+      for (const auto& imu : current_imu_buffer) {
+        imu_integration_->Integrate(imu);
+      }
+      current_pose_ = imu_integration_->GetCurrentPose();
+      
       registration_time_eval_.tic();
       registration->setInputSource(downsampled_cloud);
       registration->setInputTarget(local_map_);
@@ -116,15 +125,15 @@ void LidarOdometry::MainThread()
       registration_time_eval_.toc();
 
       // 发布pose和tf
-      PublishTF(msg->header);
-      PublishOdom(msg->header);
+      PublishTF(current_cloud_buffer->header);
+      PublishOdom(current_cloud_buffer->header);
 
       pcl::transformPointCloud(*downsampled_cloud, *downsampled_cloud, current_pose_.matrix());
       sensor_msgs::msg::PointCloud2 cloud_msg;
       pcl::toROSMsg(*downsampled_cloud, cloud_msg);
       //! 记得设置 frame_id
       cloud_msg.header.frame_id = "map";
-      cloud_msg.header.stamp = msg->header.stamp;
+      cloud_msg.header.stamp = current_cloud_buffer->header.stamp;
       cloud_pub_->publish(cloud_msg);
 
       UpdateLocalMap(downsampled_cloud, current_pose_);
@@ -136,6 +145,59 @@ void LidarOdometry::MainThread()
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
   }
+}
+
+bool LidarOdometry::GetSyncedData(sensor_msgs::msg::PointCloud2::SharedPtr& cloud_buffer, std::deque<sensor_msgs::msg::Imu::SharedPtr>& imu_buffer)
+{
+  if (lidar_cloud_buffer_.size() < 2 || imu_buffer_.size() < 5) {
+    return false;
+  }
+  cloud_buffer = nullptr;
+  imu_buffer.clear();
+  // LOG(INFO) << "Get synced data, lidar size: " << lidar_cloud_buffer_.size() << ", imu size: " << imu_buffer_.size();
+  double lidar_frame_begin_time = lidar_cloud_buffer_.front()->header.stamp.sec + lidar_cloud_buffer_.front()->header.stamp.nanosec * 1e-9;
+  double lidar_frame_end_time = lidar_cloud_buffer_[1]->header.stamp.sec + lidar_cloud_buffer_[1]->header.stamp.nanosec * 1e-9;
+  double imu_begin_time = imu_buffer_.front()->header.stamp.sec + imu_buffer_.front()->header.stamp.nanosec * 1e-9;
+  double imu_end_time = imu_buffer_.back()->header.stamp.sec + imu_buffer_.back()->header.stamp.nanosec * 1e-9;
+
+  // 三种情况
+  // 1. lidar_frame_begin_time > imu_end_time，清空imu
+  // 2. lidar_frame_end_time < imu_begin_time，清空lidar
+  // 3. lidar_frame_begin_time <= imu_begin_time && lidar_frame_end_time >= imu_end_time，同步
+
+  if (lidar_frame_begin_time > imu_end_time) {
+    std::lock_guard<std::mutex> lock(imu_buffer_mutex_);
+    imu_buffer_.clear();
+    return false;
+  }
+  if (lidar_frame_end_time < imu_begin_time) {
+    std::lock_guard<std::mutex> lock(cloud_buffer_mutex_);
+    lidar_cloud_buffer_.pop_front();
+    return false;
+  }
+
+  // 同步
+  {
+    std::lock_guard<std::mutex> lock(cloud_buffer_mutex_);
+    cloud_buffer = lidar_cloud_buffer_.front();
+  }
+  {
+    std::lock_guard<std::mutex> lock(imu_buffer_mutex_);
+    for (const auto& imu : imu_buffer_) {
+      if (imu->header.stamp.sec + imu->header.stamp.nanosec * 1e-9 > lidar_frame_begin_time &&
+          imu->header.stamp.sec + imu->header.stamp.nanosec * 1e-9 < lidar_frame_end_time) {
+        imu_buffer.push_back(imu);
+        imu_buffer_.pop_front();
+      } else if (imu->header.stamp.sec + imu->header.stamp.nanosec * 1e-9 > lidar_frame_end_time) {
+        break;
+      }
+    }
+  }
+  if (imu_buffer.size() < 5) {
+    return false;
+  }
+
+  return true;
 }
 
 RegistrationConfig LidarOdometry::ConfigRegistration()
@@ -239,6 +301,17 @@ void LidarOdometry::CloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr
       lidar_cloud_buffer_.pop_front();
     }
     lidar_cloud_buffer_.emplace_back(msg);
+  }
+}
+
+void LidarOdometry::ImuCallback(const sensor_msgs::msg::Imu::SharedPtr msg)
+{
+  std::lock_guard<std::mutex> lock(imu_buffer_mutex_);
+  imu_buffer_.emplace_back(msg);
+
+  if (imu_buffer_.size() > 20000) {
+    LOG(WARNING) << "Buffer overflow, dropping oldest data";
+    imu_buffer_.pop_front();
   }
 }
 

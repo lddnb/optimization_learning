@@ -16,6 +16,7 @@
 #include <rclcpp/rclcpp.hpp>
 #include <tf2_ros/transform_broadcaster.h>
 #include <sensor_msgs/msg/point_cloud2.hpp>
+#include <sensor_msgs/msg/imu.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <nav_msgs/msg/path.hpp>
@@ -25,6 +26,7 @@
 #include "optimization_learning/point_to_plane_icp.hpp"
 #include "optimization_learning/gicp.hpp"
 #include "optimization_learning/ndt.hpp"
+#include "optimization_learning/imu_integration.hpp"
 
 class LidarOdometry : public rclcpp::Node
 {
@@ -34,7 +36,9 @@ public:
 
 private:
   void CloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg);
+  void ImuCallback(const sensor_msgs::msg::Imu::SharedPtr msg);
   void GroundTruthPathCallback(const nav_msgs::msg::Path::SharedPtr msg);
+  bool GetSyncedData(sensor_msgs::msg::PointCloud2::SharedPtr& cloud_buffer, std::deque<sensor_msgs::msg::Imu::SharedPtr>& imu_buffer);
   void PublishTF(const std_msgs::msg::Header& header);
   void PublishOdom(const std_msgs::msg::Header& header);
   void UpdateLocalMap(const pcl::PointCloud<pcl::PointXYZI>::Ptr& msg, const Eigen::Isometry3d& pose);
@@ -43,6 +47,7 @@ private:
 
   void MainThread();
 
+  std::unique_ptr<ImuIntegration> imu_integration_;
   std::unique_ptr<RegistrationBase<pcl::PointXYZI>> registration;
   Eigen::Isometry3d current_pose_;
   pcl::VoxelGrid<pcl::PointXYZI> voxel_grid_;
@@ -50,6 +55,7 @@ private:
   
   // ros
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr cloud_sub_;
+  rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_sub_;
   rclcpp::Subscription<nav_msgs::msg::Path>::SharedPtr ground_truth_path_sub_;
   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_pub_;
   rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_pub_;
@@ -75,7 +81,8 @@ private:
   // thread
   std::unique_ptr<std::thread> main_thread_;
   std::mutex cloud_buffer_mutex_;
+  std::mutex imu_buffer_mutex_;
 
   std::deque<sensor_msgs::msg::PointCloud2::SharedPtr> lidar_cloud_buffer_;
-
+  std::deque<sensor_msgs::msg::Imu::SharedPtr> imu_buffer_;
 };

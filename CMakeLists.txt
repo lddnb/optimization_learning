@@ -72,7 +72,7 @@ target_link_libraries(icp
   gtsam
 )
 
-add_executable(odometry_node src/odometry.cpp)
+add_executable(odometry_node src/odometry.cpp src/imu_integration.cpp)
 target_link_libraries(odometry_node
   ${PCL_LIBRARIES}
   Ceres::ceres

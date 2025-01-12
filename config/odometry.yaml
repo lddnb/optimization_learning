@@ -39,6 +39,7 @@ lidar_odometry:
 
     # ROS
     lidar_topic: "/kitti/velo"  # /sensing/lidar/top/rectified/pointcloud
+    imu_topic: "/kitti/oxts/imu"
     ground_truth_path_topic: "/kitti/ground_truth"
     output_odom_topic: "/output_odom"
     output_path_topic: "/output_path"
