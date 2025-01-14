@@ -31,8 +31,8 @@ ImuIntegration::~ImuIntegration()
 
 void ImuIntegration::ProcessImu(
   const std::deque<sensor_msgs::msg::Imu::SharedPtr>& imu_buffer,
-  const pcl::PointCloud<pcl::PointXYZI>::Ptr& input_cloud,
-  pcl::PointCloud<pcl::PointXYZI>::Ptr& output_cloud)
+  const pcl::PointCloud<PointType>::Ptr& input_cloud,
+  pcl::PointCloud<PointType>::Ptr& output_cloud)
 {
   if (!is_initialized_) {
     Init(imu_buffer);
@@ -74,16 +74,22 @@ void ImuIntegration::Init(const std::deque<sensor_msgs::msg::Imu::SharedPtr>& im
 // todo
 void ImuIntegration::UndistortPoint(
   const std::deque<sensor_msgs::msg::Imu::SharedPtr>& imu_buffer,
-  const pcl::PointCloud<pcl::PointXYZI>::Ptr& point_cloud,
-  pcl::PointCloud<pcl::PointXYZI>::Ptr& undistorted_point_cloud)
+  const pcl::PointCloud<PointType>::Ptr& point_cloud,
+  pcl::PointCloud<PointType>::Ptr& undistorted_point_cloud)
 {
   auto imu_msgs = imu_buffer;
   imu_msgs.push_front(last_imu_msg_);
   const double imu_begin_timestamp = imu_msgs.front()->header.stamp.sec + imu_msgs.front()->header.stamp.nanosec * 1e-9;
   const double imu_end_timestamp = imu_msgs.back()->header.stamp.sec + imu_msgs.back()->header.stamp.nanosec * 1e-9;
-  double start_orientation = std::atan2(point_cloud->points[0].y, point_cloud->points[0].x);
+  const double start_orientation = std::atan2(point_cloud->points[0].y, point_cloud->points[0].x);
 
-
+  for (size_t i = 1; i < point_cloud->size(); i++) {
+    const double current_orientation = std::atan2(point_cloud->points[i].y, point_cloud->points[i].x);
+    const double delta_orientation = current_orientation - start_orientation;
+    const double delta_time = imu_msgs[i]->header.stamp.sec + imu_msgs[i]->header.stamp.nanosec * 1e-9 - imu_begin_timestamp;
+    const Eigen::Vector3d acc = Eigen::Vector3d(imu_msgs[i]->linear_acceleration.x, imu_msgs[i]->linear_acceleration.y, imu_msgs[i]->linear_acceleration.z);
+    const Eigen::Vector3d gyr = Eigen::Vector3d(imu_msgs[i]->angular_velocity.x, imu_msgs[i]->angular_velocity.y, imu_msgs[i]->angular_velocity.z);
+  }
 }
 
 void ImuIntegration::Integrate(const sensor_msgs::msg::Imu::SharedPtr& msg)
@@ -91,6 +97,11 @@ void ImuIntegration::Integrate(const sensor_msgs::msg::Imu::SharedPtr& msg)
   const double timestamp = msg->header.stamp.sec + msg->header.stamp.nanosec * 1e-9;
   const Eigen::Vector3d acc = Eigen::Vector3d(msg->linear_acceleration.x, msg->linear_acceleration.y, msg->linear_acceleration.z);
   const Eigen::Vector3d gyr = Eigen::Vector3d(msg->angular_velocity.x, msg->angular_velocity.y, msg->angular_velocity.z);
+
+  if (current_timestamp_ == 0.0) {
+    current_timestamp_ = timestamp;
+    return;
+  }
 
   const double dt = timestamp - current_timestamp_;
   if (dt <= 0.0 || dt > 0.1) {
@@ -122,6 +133,11 @@ void ImuIntegration::UpdatePose(const Eigen::Isometry3d& pose)
 Eigen::Isometry3d ImuIntegration::GetCurrentPose() const
 {
   return current_pose_;
+}
+
+Eigen::Vector3d ImuIntegration::GetCurrentVelocity() const
+{
+  return current_velocity_;
 }
 
 void ImuIntegration::SetBias(const Eigen::Vector3d& bias_acc, const Eigen::Vector3d& bias_gyr)

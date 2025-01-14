@@ -16,6 +16,8 @@
 
 #include "optimization_learning/common.hpp"
 
+using PointType = pcl::PointXYZ;
+
 class ImuIntegration
 {
 public:
@@ -24,16 +26,18 @@ public:
 
   void ProcessImu(
     const std::deque<sensor_msgs::msg::Imu::SharedPtr>& imu_buffer,
-    const pcl::PointCloud<pcl::PointXYZI>::Ptr& input_cloud,
-    pcl::PointCloud<pcl::PointXYZI>::Ptr& output_cloud);
+    const pcl::PointCloud<PointType>::Ptr& input_cloud,
+    pcl::PointCloud<PointType>::Ptr& output_cloud);
   void Init(const std::deque<sensor_msgs::msg::Imu::SharedPtr>& imu_buffer);
+
   void UndistortPoint(
     const std::deque<sensor_msgs::msg::Imu::SharedPtr>& imu_buffer,
-    const pcl::PointCloud<pcl::PointXYZI>::Ptr& point_cloud,
-    pcl::PointCloud<pcl::PointXYZI>::Ptr& undistorted_point_cloud);
+    const pcl::PointCloud<PointType>::Ptr& point_cloud,
+    pcl::PointCloud<PointType>::Ptr& undistorted_point_cloud);
   void Integrate(const sensor_msgs::msg::Imu::SharedPtr& msg);
   void UpdatePose(const Eigen::Isometry3d& pose);
   Eigen::Isometry3d GetCurrentPose() const;
+  Eigen::Vector3d GetCurrentVelocity() const;
   void SetBias(const Eigen::Vector3d& bias_acc, const Eigen::Vector3d& bias_gyr);
 
 private:

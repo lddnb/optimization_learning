@@ -59,7 +59,8 @@ class VoxelGrid
 public:
   explicit VoxelGrid(double resolution) : resolution_(resolution) {}
 
-  void setCloud(const pcl::PointCloud<pcl::PointXYZI>::Ptr& cloud)
+  template <typename PointT>
+  void setCloud(const pcl::PointCloud<PointT>& cloud)
   {
     voxels_.clear();
     min_bound_ = Eigen::Vector3d(
@@ -71,8 +72,8 @@ public:
       std::numeric_limits<double>::lowest(),
       std::numeric_limits<double>::lowest());
 
-    for(size_t idx = 0; idx < cloud->size(); ++idx) {
-      Eigen::Vector3d p(cloud->at(idx).x, cloud->at(idx).y, cloud->at(idx).z);
+    for(size_t idx = 0; idx < cloud.size(); ++idx) {
+      Eigen::Vector3d p(cloud.at(idx).x, cloud.at(idx).y, cloud.at(idx).z);
       min_bound_ = min_bound_.cwiseMin(p);
       max_bound_ = max_bound_.cwiseMax(p);
 
@@ -176,8 +177,9 @@ public:
   {
   }
 
+  template <typename PointT>
   CeresCostFunctorNDT(
-    const pcl::PointXYZI& curr_point,
+    const PointT& curr_point,
     const Eigen::Vector3d& voxel_mean,
     const Eigen::Matrix3d& information)
   : curr_point_(curr_point.x, curr_point.y, curr_point.z),
@@ -225,9 +227,10 @@ public:
   {
   }
 
+  template <typename PointT>
   GtsamNDTFactor(
     gtsam::Key key,
-    const pcl::PointXYZI& source_point,
+    const PointT& source_point,
     const Eigen::Vector3d& voxel_mean,
     const Eigen::Matrix3d& information,
     const gtsam::SharedNoiseModel& cost_model)
@@ -278,10 +281,11 @@ public:
   {
   }
 
+  template <typename PointT>
   GtsamNDTFactor2(
     gtsam::Key key1,
     gtsam::Key key2,
-    const pcl::PointXYZI& source_point,
+    const PointT& source_point,
     const Eigen::Vector3d& voxel_mean,
     const Eigen::Matrix3d& information,
     const gtsam::SharedNoiseModel& cost_model)
@@ -330,7 +334,7 @@ void NDT_Ceres(
 {
   // 构建目标点云的NDT体素
   VoxelGrid target_grid(config.resolution);
-  target_grid.setCloud(target_cloud_ptr);
+  target_grid.setCloud(*target_cloud_ptr);
 
   typename pcl::PointCloud<PointT>::Ptr source_points_transformed(new pcl::PointCloud<PointT>);
   Eigen::Quaterniond last_R = Eigen::Quaterniond(result_pose.rotation());
@@ -418,7 +422,7 @@ void NDT_GTSAM_SE3(
 {
   // 构建目标点云的NDT体素
   VoxelGrid target_grid(config.resolution);
-  target_grid.setCloud(target_cloud_ptr);
+  target_grid.setCloud(*target_cloud_ptr);
 
   gtsam::Pose3 last_T_gtsam = gtsam::Pose3(gtsam::Rot3(result_pose.rotation()), gtsam::Point3(result_pose.translation()));
   typename pcl::PointCloud<PointT>::Ptr source_points_transformed(new pcl::PointCloud<PointT>);
@@ -502,7 +506,7 @@ void NDT_GTSAM_SO3_R3(
 {
   // 构建目标点云的NDT体素
   VoxelGrid target_grid(config.resolution);
-  target_grid.setCloud(target_cloud_ptr);
+  target_grid.setCloud(*target_cloud_ptr);
 
   gtsam::Rot3 last_R_gtsam = gtsam::Rot3(result_pose.rotation());
   gtsam::Point3 last_t_gtsam = gtsam::Point3(result_pose.translation());
@@ -593,7 +597,7 @@ void NDT_GN(
 {
   // 构建目标点云的NDT体素
   VoxelGrid target_grid(config.resolution);
-  target_grid.setCloud(target_cloud_ptr);
+  target_grid.setCloud(*target_cloud_ptr);
 
   typename pcl::PointCloud<PointT>::Ptr source_points_transformed(new pcl::PointCloud<PointT>);
   Eigen::Matrix4d T = result_pose.matrix();

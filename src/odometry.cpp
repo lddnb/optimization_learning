@@ -46,6 +46,14 @@ LidarOdometry::LidarOdometry() : Node("lidar_odometry")
   save_map_path_ = this->declare_parameter("save_map_path", std::string());
   LOG(INFO) << "[cfg] save_map_path: " << save_map_path_;
 
+  auto T_imu2lidar = this->declare_parameter("T_imu2lidar", std::vector<double>());
+  T_imu2lidar_ = Eigen::Isometry3d::Identity();
+  T_imu2lidar_.matrix() << T_imu2lidar[0], T_imu2lidar[1], T_imu2lidar[2], T_imu2lidar[3],
+                        T_imu2lidar[4], T_imu2lidar[5], T_imu2lidar[6], T_imu2lidar[7],
+                        T_imu2lidar[8], T_imu2lidar[9], T_imu2lidar[10], T_imu2lidar[11],
+                        T_imu2lidar[12], T_imu2lidar[13], T_imu2lidar[14], T_imu2lidar[15];
+  LOG(INFO) << "[cfg] T_imu2lidar: R:" << T_imu2lidar_.linear() << std::endl << "t:" << T_imu2lidar_.translation().transpose();
+
   cloud_sub_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
     lidar_topic, qos,
     std::bind(&LidarOdometry::CloudCallback, this, std::placeholders::_1));
@@ -92,30 +100,36 @@ void LidarOdometry::MainThread()
     if (GetSyncedData(current_cloud_buffer, current_imu_buffer)) {
       LOG_FIRST_N(INFO, 10) << "Get synced data, imu size: " << current_imu_buffer.size();
       auto start_time = std::chrono::high_resolution_clock::now();
-      pcl::PointCloud<pcl::PointXYZI>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZI>);
+      pcl::PointCloud<PointType>::Ptr cloud(new pcl::PointCloud<PointType>);
       pcl::fromROSMsg(*current_cloud_buffer, *cloud);
 
       // 下采样
-      pcl::PointCloud<pcl::PointXYZI>::Ptr downsampled_cloud(new pcl::PointCloud<pcl::PointXYZI>);
+      pcl::PointCloud<PointType>::Ptr downsampled_cloud(new pcl::PointCloud<PointType>);
       downsample_time_eval_.tic();
       // voxel_grid_.setInputCloud(cloud);
       // voxel_grid_.filter(*downsampled_cloud);
-      downsampled_cloud = voxelgrid_sampling_pstl<pcl::PointXYZI>(cloud, 0.4);
+      downsampled_cloud = voxelgrid_sampling_pstl<PointType>(cloud, 0.4);
       downsample_time_eval_.toc();
 
+      // 转换到imu坐标系
+      pcl::transformPointCloud(*downsampled_cloud, *downsampled_cloud, T_imu2lidar_.matrix());
+
       if (local_map_ == nullptr) {
-        local_map_.reset(new pcl::PointCloud<pcl::PointXYZI>);
+        local_map_.reset(new pcl::PointCloud<PointType>);
         local_map_ = downsampled_cloud;
         PublishTF(current_cloud_buffer->header);
         PublishOdom(current_cloud_buffer->header);
         continue;
       }
-      imu_integration_->UpdatePose(current_pose_);
-      for (const auto& imu : current_imu_buffer) {
-        imu_integration_->Integrate(imu);
-      }
-      current_pose_ = imu_integration_->GetCurrentPose();
-      
+      // LOG_FIRST_N(INFO, 10000) << "pose before: " << current_pose_.translation().transpose();
+      // imu_integration_->UpdatePose(current_pose_);
+      // for (const auto& imu : current_imu_buffer) {
+      //   imu_integration_->Integrate(imu);
+      // }
+      // current_pose_ = imu_integration_->GetCurrentPose();
+      // LOG_FIRST_N(INFO, 10000) << "pose after: " << current_pose_.translation().transpose();
+      // LOG_FIRST_N(INFO, 10000) << "velocity: " << imu_integration_->GetCurrentVelocity().transpose();
+
       registration_time_eval_.tic();
       registration->setInputSource(downsampled_cloud);
       registration->setInputTarget(local_map_);
@@ -220,19 +234,19 @@ RegistrationConfig LidarOdometry::ConfigRegistration()
   // 创建配准对象
   switch (reg_config.registration_type) {
     case RegistrationConfig::ICP: {
-      registration = std::make_unique<ICPRegistration<pcl::PointXYZI>>(reg_config);
+      registration = std::make_unique<ICPRegistration<PointType>>(reg_config);
       break;
     }
     case RegistrationConfig::NICP: {
-      registration = std::make_unique<NICPRegistration<pcl::PointXYZI>>(reg_config);
+      registration = std::make_unique<NICPRegistration<PointType>>(reg_config);
       break;
     }
     case RegistrationConfig::GICP: {
-      registration = std::make_unique<GICPRegistration<pcl::PointXYZI>>(reg_config);
+      registration = std::make_unique<GICPRegistration<PointType>>(reg_config);
       break;
     }
     case RegistrationConfig::NDT: {
-      registration = std::make_unique<NDTRegistration<pcl::PointXYZI>>(reg_config);
+      registration = std::make_unique<NDTRegistration<PointType>>(reg_config);
       break;
     }
     default: {
@@ -285,9 +299,9 @@ void LidarOdometry::CloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr
   char buffer[80];
   strftime(buffer, 80, "%Y-%m-%d %H:%M:%S", timeinfo);
   
-  LOG(INFO) << "lidar_frame_index: " << lidar_frame_index++ 
-            << " with stamp: " << buffer 
-            << "." << std::setfill('0') << std::setw(9) << msg->header.stamp.nanosec;
+  // LOG(INFO) << "lidar_frame_index: " << lidar_frame_index++ 
+  //           << " with stamp: " << buffer 
+  //           << "." << std::setfill('0') << std::setw(9) << msg->header.stamp.nanosec;
 
   if (lidar_frame_.empty()) {
     lidar_frame_ = msg->header.frame_id;
@@ -320,29 +334,28 @@ void LidarOdometry::GroundTruthPathCallback(const nav_msgs::msg::Path::SharedPtr
   ground_truth_path_ = *msg;
 }
 
-void LidarOdometry::UpdateLocalMap(const pcl::PointCloud<pcl::PointXYZI>::Ptr& msg, const Eigen::Isometry3d& pose)
+void LidarOdometry::UpdateLocalMap(const pcl::PointCloud<PointType>::Ptr& msg, const Eigen::Isometry3d& pose)
 {
-  static std::deque<pcl::PointCloud<pcl::PointXYZI>::Ptr> local_map_list;
-  static Eigen::Isometry3d last_key_pose = Eigen::Isometry3d::Identity();
-  local_map_list.push_back(msg);
+  static std::deque<pcl::PointCloud<PointType>::Ptr> local_map_list;
+  static Eigen::Isometry3d last_pose = Eigen::Isometry3d::Identity();
+  auto delta_pose = pose * last_pose.inverse();
+  last_pose = pose;
+  if (local_map_list.empty() || delta_pose.translation().norm() > update_translation_delta_ ||
+      Eigen::AngleAxisd(delta_pose.rotation()).angle() > update_rotation_delta_) {
+    local_map_list.push_back(msg);
+    *local_map_ += *msg;
+  }
 
-  auto delta_pose = pose * last_key_pose.inverse();
   if (
     local_map_list.size() >= local_map_min_frame_size_ &&
-    (local_map_list.size() >= update_frame_size_ ||
-     delta_pose.translation().norm() > update_translation_delta_ ||
-     Eigen::AngleAxisd(delta_pose.rotation()).angle() > update_rotation_delta_)) {
-    local_map_.reset(new pcl::PointCloud<pcl::PointXYZI>);
+    (local_map_list.size() >= update_frame_size_)) {
+    local_map_.reset(new pcl::PointCloud<PointType>);
     for (const auto& cloud : local_map_list) {
       *local_map_ += *cloud;
     }
     LOG(INFO) << "Update local map size: " << local_map_list.size();
     local_map_list.clear();
-    last_key_pose = pose;
-    return;
   }
-
-  *local_map_ += *msg;
 }
 
 void LidarOdometry::PublishTF(const std_msgs::msg::Header& header)

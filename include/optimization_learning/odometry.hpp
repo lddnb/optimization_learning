@@ -41,17 +41,17 @@ private:
   bool GetSyncedData(sensor_msgs::msg::PointCloud2::SharedPtr& cloud_buffer, std::deque<sensor_msgs::msg::Imu::SharedPtr>& imu_buffer);
   void PublishTF(const std_msgs::msg::Header& header);
   void PublishOdom(const std_msgs::msg::Header& header);
-  void UpdateLocalMap(const pcl::PointCloud<pcl::PointXYZI>::Ptr& msg, const Eigen::Isometry3d& pose);
+  void UpdateLocalMap(const pcl::PointCloud<PointType>::Ptr& msg, const Eigen::Isometry3d& pose);
   void SaveMappingResult();
   RegistrationConfig ConfigRegistration();
 
   void MainThread();
 
   std::unique_ptr<ImuIntegration> imu_integration_;
-  std::unique_ptr<RegistrationBase<pcl::PointXYZI>> registration;
+  std::unique_ptr<RegistrationBase<PointType>> registration;
   Eigen::Isometry3d current_pose_;
-  pcl::VoxelGrid<pcl::PointXYZI> voxel_grid_;
-  pcl::PointCloud<pcl::PointXYZI>::Ptr local_map_;
+  pcl::VoxelGrid<PointType> voxel_grid_;
+  pcl::PointCloud<PointType>::Ptr local_map_;
   
   // ros
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr cloud_sub_;
@@ -85,4 +85,7 @@ private:
 
   std::deque<sensor_msgs::msg::PointCloud2::SharedPtr> lidar_cloud_buffer_;
   std::deque<sensor_msgs::msg::Imu::SharedPtr> imu_buffer_;
+
+  // calibration
+  Eigen::Isometry3d T_imu2lidar_;
 };

@@ -38,8 +38,8 @@ lidar_odometry:
     verbose: false
 
     # ROS
-    lidar_topic: "/kitti/velo"  # /sensing/lidar/top/rectified/pointcloud
-    imu_topic: "/kitti/oxts/imu"
+    lidar_topic: "/points_raw"  # /sensing/lidar/top/rectified/pointcloud
+    imu_topic: "/imu_raw"
     ground_truth_path_topic: "/kitti/ground_truth"
     output_odom_topic: "/output_odom"
     output_path_topic: "/output_path"
@@ -48,8 +48,21 @@ lidar_odometry:
     # local map
     local_map_min_frame_size: 5
     update_frame_size: 10
-    update_translation_delta: 2.0
-    update_rotation_delta: 30.0
+    update_translation_delta: 0.5  # meters
+    update_rotation_delta: 15.0  # degrees
 
     # save map
     save_map_path: "/home/ubuntu/ros_ws/src/optimization_learning/map"
+
+    # calibration
+    # KITTI
+    # T_imu2lidar: [1.00000, -0.00079, 0.00202, 0.81054,
+    #               0.00076, 0.99989, 0.01482, -0.30705,
+    #               -0.00204, -0.01482, 0.99989, 0.80272,
+    #               0.00000, 0.00000, 0.00000, 1.00000]
+
+    # NCLT
+    T_imu2lidar: [1.00000, 0.00000, 0.00000, 0.00000,
+                  0.00000, 1.00000, 0.00000, 0.00000,
+                  0.00000, 0.00000, 1.00000, 0.28,
+                  0.00000, 0.00000, 0.00000, 1.00000]

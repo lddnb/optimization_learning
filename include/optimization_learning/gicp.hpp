@@ -138,9 +138,10 @@ public:
   {
   }
 
+  template <typename PointT>
   CeresCostFunctorGICP(
-    const pcl::PointXYZI& curr_point,
-    const pcl::PointXYZI& target_point,
+    const PointT& curr_point,
+    const PointT& target_point,
     const Eigen::Matrix3d& information)
   : curr_point_(curr_point.x, curr_point.y, curr_point.z),
     target_point_(target_point.x, target_point.y, target_point.z),
@@ -184,10 +185,11 @@ public:
   {
   }
 
+  template <typename PointT>
   GtsamGICPFactor(
     gtsam::Key key,
-    const pcl::PointXYZI& source_point,
-    const pcl::PointXYZI& target_point,
+    const PointT& source_point,
+    const PointT& target_point,
     const Eigen::Matrix3d& information,
     const gtsam::SharedNoiseModel& cost_model)
   : gtsam::NoiseModelFactor1<gtsam::Pose3>(cost_model, key),
@@ -236,11 +238,12 @@ public:
   {
   }
 
+  template <typename PointT>
   GtsamGICPFactor2(
     gtsam::Key key1,
     gtsam::Key key2,
-    const pcl::PointXYZI& source_point,
-    const pcl::PointXYZI& target_point,
+    const PointT& source_point,
+    const PointT& target_point,
     const Eigen::Matrix3d& information,
     const gtsam::SharedNoiseModel& cost_model)
   : gtsam::NoiseModelFactor2<gtsam::Rot3, gtsam::Point3>(cost_model, key1, key2),
@@ -717,13 +720,13 @@ void GICP_small_gicp(
     source_cloud_ptr->begin(),
     source_cloud_ptr->end(),
     source_eigen.begin(),
-    [](const pcl::PointXYZI& point) { return Eigen::Vector3d(point.x, point.y, point.z); });
+    [](const PointT& point) { return Eigen::Vector3d(point.x, point.y, point.z); });
   std::transform(
     std::execution::par,
     target_cloud_ptr->begin(),
     target_cloud_ptr->end(),
     target_eigen.begin(),
-    [](const pcl::PointXYZI& point) { return Eigen::Vector3d(point.x, point.y, point.z); });
+    [](const PointT& point) { return Eigen::Vector3d(point.x, point.y, point.z); });
 
   auto target = std::make_shared<small_gicp::PointCloud>(target_eigen);
   auto source = std::make_shared<small_gicp::PointCloud>(source_eigen);
@@ -772,13 +775,13 @@ void VGICP_small_gicp(
     source_cloud_ptr->begin(),
     source_cloud_ptr->end(),
     source_eigen.begin(),
-    [](const pcl::PointXYZI& point) { return Eigen::Vector3d(point.x, point.y, point.z); });
+    [](const PointT& point) { return Eigen::Vector3d(point.x, point.y, point.z); });
   std::transform(
     std::execution::par,
     target_cloud_ptr->begin(),
     target_cloud_ptr->end(),
     target_eigen.begin(),
-    [](const pcl::PointXYZI& point) { return Eigen::Vector3d(point.x, point.y, point.z); });
+    [](const PointT& point) { return Eigen::Vector3d(point.x, point.y, point.z); });
 
   auto target = std::make_shared<small_gicp::PointCloud>(target_eigen);
   auto source = std::make_shared<small_gicp::PointCloud>(source_eigen);
