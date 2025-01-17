@@ -34,7 +34,7 @@
 #include <pcl/registration/ndt.h>
 #include <pcl/visualization/pcl_visualizer.h>
 
-#include <optimization_learning/so3_tool.hpp>
+#include "optimization_learning/so3_tool.hpp"
 
 using H_b_type = std::pair<Eigen::Matrix<double, 6, 6>, Eigen::Matrix<double, 6, 1>>;
 
@@ -66,6 +66,81 @@ using H_b_type = std::pair<Eigen::Matrix<double, 6, 6>, Eigen::Matrix<double, 6,
 // }
 // next_iteration = false;
 
+struct EIGEN_ALIGN16 _PointXYZIT {
+  PCL_ADD_POINT4D;
+  PCL_ADD_INTENSITY
+  float time;
+  PCL_MAKE_ALIGNED_OPERATOR_NEW
+};
+
+struct EIGEN_ALIGN16 PointXYZIT : public _PointXYZIT
+{
+  // 构造函数
+  inline PointXYZIT(const _PointXYZIT &p) : _PointXYZIT(p) {}
+  
+  inline PointXYZIT() 
+  {
+    x = y = z = 0.0f;
+    data[3] = 1.0f;
+    intensity = 0.0f;
+    time = 0.0f;
+  }
+
+  inline PointXYZIT(float _x, float _y, float _z)
+    : PointXYZIT()
+  {
+    x = _x; y = _y; z = _z;
+  }
+
+  inline PointXYZIT(float _x, float _y, float _z, float _intensity, float _time)
+    : PointXYZIT(_x, _y, _z)
+  {
+    intensity = _intensity;
+    time = _time;
+  }
+
+  friend std::ostream& operator<<(std::ostream& os, const PointXYZIT& p)
+  {
+    os << "(" << p.x << "," << p.y << "," << p.z << " - " << p.intensity << "," << p.time << ")";
+    return os;
+  }
+  PCL_MAKE_ALIGNED_OPERATOR_NEW
+};
+
+// 注册点类型
+POINT_CLOUD_REGISTER_POINT_STRUCT(PointXYZIT,
+    (float, x, x)
+    (float, y, y)
+    (float, z, z)
+    (float, intensity, intensity)
+    (float, time, time)
+)
+
+POINT_CLOUD_REGISTER_POINT_WRAPPER(PointXYZIT, _PointXYZIT)
+
+template class pcl::VoxelGrid<PointXYZIT>;
+template class pcl::KdTreeFLANN<PointXYZIT>;
+template class pcl::NormalEstimationOMP<PointXYZIT, pcl::Normal>;
+struct EIGEN_ALIGN16 VelodynePoint {
+  PCL_ADD_POINT4D;
+  float intensity;
+  float time;
+  std::uint16_t ring;
+  PCL_MAKE_ALIGNED_OPERATOR_NEW
+};
+
+POINT_CLOUD_REGISTER_POINT_STRUCT(
+  VelodynePoint,
+  (float, x, x)(float, y, y)(float, z, z)(float, intensity, intensity)(float, time, time)(std::uint16_t, ring, ring))
+
+struct Pose6D {
+  double offset_time;
+  Eigen::Vector3d acc;
+  Eigen::Vector3d gyr;
+  Eigen::Vector3d vel;
+  Eigen::Vector3d pos;
+  Eigen::Quaterniond rot;
+};
 
 class TimeEval
 {

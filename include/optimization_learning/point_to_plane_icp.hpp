@@ -629,6 +629,10 @@ void P2PlaneICP_PCL(
   int& num_iterations,
   const RegistrationConfig& config)
 {
+  pcl::PointCloud<pcl::PointXYZI> source_cloud;
+  pcl::PointCloud<pcl::PointXYZI> target_cloud;
+  pcl::copyPointCloud(*source_cloud_ptr, source_cloud);
+  pcl::copyPointCloud(*target_cloud_ptr, target_cloud);
   pcl::PointCloud<pcl::PointXYZINormal>::Ptr source_cloud_with_normal(new pcl::PointCloud<pcl::PointXYZINormal>);
   pcl::PointCloud<pcl::PointXYZINormal>::Ptr target_cloud_with_normal(new pcl::PointCloud<pcl::PointXYZINormal>);
   pcl::NormalEstimationOMP<PointT, pcl::Normal> norm_est;
@@ -639,11 +643,11 @@ void P2PlaneICP_PCL(
   norm_est.setSearchMethod(tree);
   norm_est.setInputCloud(source_cloud_ptr);
   norm_est.compute(*normals);
-  pcl::concatenateFields(*source_cloud_ptr, *normals, *source_cloud_with_normal);
+  pcl::concatenateFields(source_cloud, *normals, *source_cloud_with_normal);
 
   norm_est.setInputCloud(target_cloud_ptr);
   norm_est.compute(*normals);
-  pcl::concatenateFields(*target_cloud_ptr, *normals, *target_cloud_with_normal);
+  pcl::concatenateFields(target_cloud, *normals, *target_cloud_with_normal);
 
   pcl::IterativeClosestPointWithNormals<pcl::PointXYZINormal, pcl::PointXYZINormal> nicp;
   nicp.setInputSource(source_cloud_with_normal);

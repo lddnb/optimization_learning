@@ -40,6 +40,15 @@ Eigen::Matrix<typename Derived::Scalar, 3, 3> Exp(const Eigen::MatrixBase<Derive
 }
 
 template <typename Derived>
+Eigen::Matrix<typename Derived::Scalar, 3, 1> Log(const Eigen::MatrixBase<Derived>& R)
+{
+  typename Derived::Scalar theta = (R.trace() > 3.0 - 1e-6) ? 0.0 : std::acos(0.5 * (R.trace() - 1));
+  Eigen::Matrix<typename Derived::Scalar, 3, 1> K(R(2,1) - R(1,2), R(0,2) - R(2,0), R(1,0) - R(0,1));
+  return (std::abs(theta) < 0.001) ? (0.5 * K) : (0.5 * theta / std::sin(theta) * K);
+}
+
+
+template <typename Derived>
 Eigen::Matrix<typename Derived::Scalar, 3, 3> Jacob_right_inv(const Eigen::MatrixBase<Derived>& vec)
 {
   Eigen::Matrix<typename Derived::Scalar, 3, 3> hat_v = Hat(vec);

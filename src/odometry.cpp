@@ -76,6 +76,8 @@ LidarOdometry::LidarOdometry() : Node("lidar_odometry")
   imu_integration_ = std::make_unique<ImuIntegration>();
   imu_integration_->SetBias(Eigen::Vector3d(0.0001, 0.0001, 0.0001), Eigen::Vector3d(0.0001, 0.0001, 0.0001));
 
+  eskf_ = std::make_unique<ESKF>();
+
   // 初始化时间评估
   downsample_time_eval_ = TimeEval("downsample");
   registration_time_eval_ = TimeEval("registration");
@@ -101,7 +103,8 @@ void LidarOdometry::MainThread()
       LOG_FIRST_N(INFO, 10) << "Get synced data, imu size: " << current_imu_buffer.size();
       auto start_time = std::chrono::high_resolution_clock::now();
       pcl::PointCloud<PointType>::Ptr cloud(new pcl::PointCloud<PointType>);
-      pcl::fromROSMsg(*current_cloud_buffer, *cloud);
+      // pcl::fromROSMsg(*current_cloud_buffer, *cloud);
+      VelodyneHandler(current_cloud_buffer, *cloud);
 
       // 下采样
       pcl::PointCloud<PointType>::Ptr downsampled_cloud(new pcl::PointCloud<PointType>);
@@ -114,13 +117,33 @@ void LidarOdometry::MainThread()
       // 转换到imu坐标系
       pcl::transformPointCloud(*downsampled_cloud, *downsampled_cloud, T_imu2lidar_.matrix());
 
+      static int cnt = 0;
+      pcl::PointCloud<PointType>::Ptr undistorted_cloud(new pcl::PointCloud<PointType>(*downsampled_cloud));
+      if (!imu_integration_->ProcessImu(current_imu_buffer, downsampled_cloud, *undistorted_cloud, eskf_)) {
+        LOG(WARNING) << "IMU initializing " << imu_integration_->GetInitImuSize() << " frames";
+        continue;
+      }
+      if (cnt < 10) pcl::io::savePCDFileASCII("/home/ubuntu/data/NCLT/before_undistorted_cloud_" + std::to_string(cnt) + ".pcd", *downsampled_cloud);
+      if (cnt < 10) pcl::io::savePCDFileASCII("/home/ubuntu/data/NCLT/after_undistorted_cloud_" + std::to_string(cnt) + ".pcd", *undistorted_cloud);
+      cnt++;
+
+      LOG(INFO) << "undistorted_cloud size: " << undistorted_cloud->size();
+
       if (local_map_ == nullptr) {
         local_map_.reset(new pcl::PointCloud<PointType>);
-        local_map_ = downsampled_cloud;
+        local_map_ = undistorted_cloud;
+        pcl::io::savePCDFileASCII("/home/ubuntu/data/NCLT/local_map_0.pcd", *local_map_);
         PublishTF(current_cloud_buffer->header);
         PublishOdom(current_cloud_buffer->header);
         continue;
       }
+      LOG(INFO) << "local_map_ size: " << local_map_->size();
+      static bool save_local_map = false;
+      if (!save_local_map) {
+        pcl::io::savePCDFileASCII("/home/ubuntu/data/NCLT/local_map_1.pcd", *local_map_);
+        save_local_map = true;
+      }
+
       // LOG_FIRST_N(INFO, 10000) << "pose before: " << current_pose_.translation().transpose();
       // imu_integration_->UpdatePose(current_pose_);
       // for (const auto& imu : current_imu_buffer) {
@@ -131,7 +154,7 @@ void LidarOdometry::MainThread()
       // LOG_FIRST_N(INFO, 10000) << "velocity: " << imu_integration_->GetCurrentVelocity().transpose();
 
       registration_time_eval_.tic();
-      registration->setInputSource(downsampled_cloud);
+      registration->setInputSource(undistorted_cloud);
       registration->setInputTarget(local_map_);
       registration->setInitialTransformation(current_pose_);
       int iterations = 0;
@@ -142,15 +165,15 @@ void LidarOdometry::MainThread()
       PublishTF(current_cloud_buffer->header);
       PublishOdom(current_cloud_buffer->header);
 
-      pcl::transformPointCloud(*downsampled_cloud, *downsampled_cloud, current_pose_.matrix());
+      pcl::transformPointCloud(*undistorted_cloud, *undistorted_cloud, current_pose_.matrix());
       sensor_msgs::msg::PointCloud2 cloud_msg;
-      pcl::toROSMsg(*downsampled_cloud, cloud_msg);
+      pcl::toROSMsg(*undistorted_cloud, cloud_msg);
       //! 记得设置 frame_id
       cloud_msg.header.frame_id = "map";
       cloud_msg.header.stamp = current_cloud_buffer->header.stamp;
       cloud_pub_->publish(cloud_msg);
 
-      UpdateLocalMap(downsampled_cloud, current_pose_);
+      UpdateLocalMap(undistorted_cloud, current_pose_);
 
       auto end_time = std::chrono::high_resolution_clock::now();
       auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
@@ -177,7 +200,7 @@ bool LidarOdometry::GetSyncedData(sensor_msgs::msg::PointCloud2::SharedPtr& clou
   // 三种情况
   // 1. lidar_frame_begin_time > imu_end_time，清空imu
   // 2. lidar_frame_end_time < imu_begin_time，清空lidar
-  // 3. lidar_frame_begin_time <= imu_begin_time && lidar_frame_end_time >= imu_end_time，同步
+  // 3. lidar_frame_begin_time <= imu_begin_time && lidar_frame_end_time >= imu_end_time，同步，取点云扫描时间内的imu
 
   if (lidar_frame_begin_time > imu_end_time) {
     std::lock_guard<std::mutex> lock(imu_buffer_mutex_);
@@ -200,7 +223,7 @@ bool LidarOdometry::GetSyncedData(sensor_msgs::msg::PointCloud2::SharedPtr& clou
     for (const auto& imu : imu_buffer_) {
       if (imu->header.stamp.sec + imu->header.stamp.nanosec * 1e-9 > lidar_frame_begin_time &&
           imu->header.stamp.sec + imu->header.stamp.nanosec * 1e-9 < lidar_frame_end_time) {
-        imu_buffer.push_back(imu);
+        imu_buffer.emplace_back(imu);
         imu_buffer_.pop_front();
       } else if (imu->header.stamp.sec + imu->header.stamp.nanosec * 1e-9 > lidar_frame_end_time) {
         break;
@@ -291,7 +314,8 @@ void LidarOdometry::SaveMappingResult()
 void LidarOdometry::CloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg)
 {
   static int lidar_frame_index = 0;
-  double stamp = msg->header.stamp.sec + msg->header.stamp.nanosec / 1e9;
+  double stamp = msg->header.stamp.sec + msg->header.stamp.nanosec * 1e-9;
+  LOG_FIRST_N(INFO, 10) << "stamp: " << stamp;
   
   // 将UTC时间戳转换为时间结构
   time_t time_stamp = static_cast<time_t>(stamp);
@@ -299,9 +323,9 @@ void LidarOdometry::CloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr
   char buffer[80];
   strftime(buffer, 80, "%Y-%m-%d %H:%M:%S", timeinfo);
   
-  // LOG(INFO) << "lidar_frame_index: " << lidar_frame_index++ 
-  //           << " with stamp: " << buffer 
-  //           << "." << std::setfill('0') << std::setw(9) << msg->header.stamp.nanosec;
+  LOG_FIRST_N(INFO, 10) << "lidar_frame_index: " << lidar_frame_index++ 
+            << " with stamp: " << buffer 
+            << "." << std::setfill('0') << std::setw(9) << msg->header.stamp.nanosec;
 
   if (lidar_frame_.empty()) {
     lidar_frame_ = msg->header.frame_id;

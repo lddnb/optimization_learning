@@ -733,16 +733,20 @@ void NDT_OMP(
   int& num_iterations,
   const RegistrationConfig& config)
 {
-  typename pclomp::NormalDistributionsTransform<PointT, PointT>::Ptr ndt_omp(new pclomp::NormalDistributionsTransform<PointT, PointT>());
+  pcl::PointCloud<pcl::PointXYZI>::Ptr source_cloud(new pcl::PointCloud<pcl::PointXYZI>);
+  pcl::PointCloud<pcl::PointXYZI>::Ptr target_cloud(new pcl::PointCloud<pcl::PointXYZI>);
+  pcl::copyPointCloud(*source_cloud_ptr, *source_cloud);
+  pcl::copyPointCloud(*target_cloud_ptr, *target_cloud);
+  pclomp::NormalDistributionsTransform<pcl::PointXYZI, pcl::PointXYZI>::Ptr ndt_omp(new pclomp::NormalDistributionsTransform<pcl::PointXYZI, pcl::PointXYZI>());
   ndt_omp->setResolution(config.resolution);
   ndt_omp->setNeighborhoodSearchMethod(pclomp::DIRECT7);
-  ndt_omp->setInputTarget(target_cloud_ptr);
-  ndt_omp->setInputSource(source_cloud_ptr);
+  ndt_omp->setInputTarget(target_cloud);
+  ndt_omp->setInputSource(source_cloud);
   ndt_omp->setMaximumIterations(config.max_iterations);
   ndt_omp->setTransformationEpsilon(config.translation_eps);
   ndt_omp->setEuclideanFitnessEpsilon(config.translation_eps);
 
-  pcl::PointCloud<PointT> output_cloud;
+  pcl::PointCloud<pcl::PointXYZI> output_cloud;
   ndt_omp->align(output_cloud, result_pose.matrix().cast<float>());
 
   result_pose = ndt_omp->getFinalTransformation().template cast<double>();

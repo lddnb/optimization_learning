@@ -3,6 +3,8 @@ project(optimization_learning)
 
 option(BUILD_BENCHMARKING "Build benchmarks" ON)
 
+add_definitions(-DPCL_NO_PRECOMPILE)
+
 SET(CMAKE_BUILD_TYPE "Release")
 add_compile_options(-std=c++17)
 set(CMAKE_CXX_STANDARD 17)
@@ -72,7 +74,7 @@ target_link_libraries(icp
   gtsam
 )
 
-add_executable(odometry_node src/odometry.cpp src/imu_integration.cpp)
+add_executable(odometry_node src/odometry.cpp src/imu_integration.cpp src/eskf.cpp)
 target_link_libraries(odometry_node
   ${PCL_LIBRARIES}
   Ceres::ceres

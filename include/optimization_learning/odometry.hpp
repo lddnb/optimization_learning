@@ -27,6 +27,7 @@
 #include "optimization_learning/gicp.hpp"
 #include "optimization_learning/ndt.hpp"
 #include "optimization_learning/imu_integration.hpp"
+#include "optimization_learning/cloud_process.hpp"
 
 class LidarOdometry : public rclcpp::Node
 {
@@ -88,4 +89,7 @@ private:
 
   // calibration
   Eigen::Isometry3d T_imu2lidar_;
+
+  // eskf
+  std::unique_ptr<ESKF> eskf_;
 };
