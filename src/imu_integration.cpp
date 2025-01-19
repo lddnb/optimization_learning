@@ -11,6 +11,27 @@
 
 #include "optimization_learning/imu_integration.hpp"
 
+template <typename C, typename D, typename Getter>
+void ComputeMeanAndCovDiag(const C& data, D& mean, D& cov_diag, Getter&& getter)
+{
+  size_t len = data.size();
+  assert(len > 1);
+  mean = std::accumulate(
+           data.begin(),
+           data.end(),
+           D::Zero().eval(),
+           [&getter](const D& sum, const auto& data) -> D { return sum + getter(data); }) /
+         len;
+  cov_diag = std::accumulate(
+               data.begin(),
+               data.end(),
+               D::Zero().eval(),
+               [&mean, &getter](const D& sum, const auto& data) -> D {
+                 return sum + (getter(data) - mean).cwiseAbs2().eval();
+               }) /
+             (len - 1);
+}
+
 ImuIntegration::ImuIntegration()
 {
   current_pose_ = Eigen::Isometry3d::Identity();
@@ -33,17 +54,16 @@ ImuIntegration::~ImuIntegration()
 }
 
 bool ImuIntegration::ProcessImu(
-  const std::deque<sensor_msgs::msg::Imu::SharedPtr>& imu_buffer,
-  const pcl::PointCloud<PointType>::Ptr& input_cloud,
+  const SyncedData& synced_data,
   pcl::PointCloud<PointType>& output_cloud,
   std::unique_ptr<ESKF>& eskf)
 {
   if (!is_initialized_) {
-    Init(imu_buffer, eskf);
+    Init(synced_data.imu, eskf);
     return false;
   }
 
-  UndistortPoint(imu_buffer, input_cloud, output_cloud, eskf);
+  UndistortPoint(synced_data, output_cloud, eskf);
   return true;
 }
 
@@ -51,6 +71,7 @@ void ImuIntegration::Init(const std::deque<sensor_msgs::msg::Imu::SharedPtr>& im
 {
   static Eigen::Vector3d cur_acc = Eigen::Vector3d::Zero();
   static Eigen::Vector3d cur_gyr = Eigen::Vector3d::Zero();
+  init_imu_deque_.insert(init_imu_deque_.end(), imu_buffer.begin(), imu_buffer.end());
   if (mean_acc_.isZero() && mean_gyr_.isZero()) {
     cur_acc << imu_buffer.front()->linear_acceleration.x, imu_buffer.front()->linear_acceleration.y,
       imu_buffer.front()->linear_acceleration.z;
@@ -68,8 +89,8 @@ void ImuIntegration::Init(const std::deque<sensor_msgs::msg::Imu::SharedPtr>& im
 
     init_imu_size_++;
   }
-  if (init_imu_size_ >= 100) {
-    eskf->SetBiasAcc(mean_acc_);
+  if (init_imu_size_ >= 300) {
+    // eskf->SetBiasAcc(mean_acc_);
     eskf->SetBiasGyro(mean_gyr_);
     
     const Eigen::Vector3d gravity_direction = -mean_acc_ / mean_acc_.norm();
@@ -98,12 +119,38 @@ void ImuIntegration::Init(const std::deque<sensor_msgs::msg::Imu::SharedPtr>& im
     LOG(INFO) << "Acceleration bias: " << eskf->GetBiasAcc().transpose();
     LOG(INFO) << "Gyroscope bias: " << eskf->GetBiasGyro().transpose();
     LOG(INFO) << "Gravity vector: " << eskf->GetGravity().transpose();
+
+    Eigen::Vector3d mean_gyro, mean_acce;
+    Eigen::Vector3d cov_gyro, cov_acce;
+    ComputeMeanAndCovDiag(init_imu_deque_, mean_gyro, cov_gyro, [](const sensor_msgs::msg::Imu::SharedPtr& imu) {
+      return Eigen::Vector3d(imu->angular_velocity.x, imu->angular_velocity.y, imu->angular_velocity.z);
+    });
+    ComputeMeanAndCovDiag(init_imu_deque_, mean_acce, cov_acce, [this](const sensor_msgs::msg::Imu::SharedPtr& imu) {
+      return Eigen::Vector3d(imu->linear_acceleration.x, imu->linear_acceleration.y, imu->linear_acceleration.z);
+    });
+
+    // 以acce均值为方向，取9.8长度为重力
+    gravity_ = -mean_acce / mean_acce.norm() * 9.81;
+    LOG(INFO) << "gravity: " << gravity_.transpose();
+    CHECK_NEAR((gravity_ - eskf->GetGravity()).norm(), 0, 1e-3);
+
+    // 重新计算加计的协方差
+    ComputeMeanAndCovDiag(init_imu_deque_, mean_acce, cov_acce, [this](const sensor_msgs::msg::Imu::SharedPtr& imu) {
+      //! 必须保证返回的类型是 Eigen::Vector3d，不能用 return Eigen::Vector3d(...) + gravity_;
+      Eigen::Vector3d acc = Eigen::Vector3d(imu->linear_acceleration.x, imu->linear_acceleration.y, imu->linear_acceleration.z);
+      acc += gravity_;
+      return acc;
+    });
+    LOG(INFO) << "bg: " << mean_gyro.transpose();
+    LOG(INFO) << "ba: " << mean_acce.transpose();
+    CHECK_NEAR((mean_gyro - mean_gyr_).norm(), 0, 1e-3);
+    // CHECK_NEAR((mean_acce - mean_acc_).norm(), 0, 1e-3);
+    // eskf->SetBiasAcc(mean_acce);
   }
 }
 
 void ImuIntegration::UndistortPoint(
-  const std::deque<sensor_msgs::msg::Imu::SharedPtr>& imu_buffer,
-  const pcl::PointCloud<PointType>::Ptr& point_cloud,
+  const SyncedData& synced_data,
   pcl::PointCloud<PointType>& undistorted_point_cloud,
   std::unique_ptr<ESKF>& eskf)
 {
@@ -112,15 +159,15 @@ void ImuIntegration::UndistortPoint(
   static std::vector<Pose6D> imu_pose_list;
   static double last_lidar_end_time_ = 0.0;
 
-  auto imu_msgs = imu_buffer;
+  auto imu_msgs = synced_data.imu;
   imu_msgs.push_front(last_imu_msg_);
   const double imu_begin_timestamp = imu_msgs.front()->header.stamp.sec + imu_msgs.front()->header.stamp.nanosec * 1e-9;
   const double imu_end_timestamp = imu_msgs.back()->header.stamp.sec + imu_msgs.back()->header.stamp.nanosec * 1e-9;
 
-  undistorted_point_cloud = *point_cloud;
+  undistorted_point_cloud = *synced_data.cloud;
   std::sort(std::execution::par, undistorted_point_cloud.points.begin(), undistorted_point_cloud.points.end(), time_list<PointType>);
-  const double point_begin_timestamp = undistorted_point_cloud.points.front().time;
-  const double point_end_timestamp = undistorted_point_cloud.points.back().time;
+  const double point_begin_timestamp = undistorted_point_cloud.points.front().time + synced_data.lidar_begin_timestamp;
+  const double point_end_timestamp = undistorted_point_cloud.points.back().time + synced_data.lidar_begin_timestamp;
 
   imu_pose_list.clear();
 
@@ -159,6 +206,8 @@ void ImuIntegration::UndistortPoint(
     acc_avr << 0.5 * (head->linear_acceleration.x + tail->linear_acceleration.x),
       0.5 * (head->linear_acceleration.y + tail->linear_acceleration.y),
       0.5 * (head->linear_acceleration.z + tail->linear_acceleration.z);
+    LOG_FIRST_N(WARNING, 1000) << "acc_avr: " << (acc_avr + gravity_).transpose();
+
 
     acc_avr = acc_avr * 9.81 / mean_acc_.norm();
 
@@ -168,16 +217,19 @@ void ImuIntegration::UndistortPoint(
       dt = tail_time - head_time;
     }
 
+    // LOG_FIRST_N(INFO, 100) << "dt: " << dt;
+
     eskf->Predict(acc_avr, angvel_avr, dt);
 
     /* save the poses at each IMU measurements */
     angvel_last = angvel_avr - eskf->GetBiasGyro();
     acc_s_last  = eskf->GetRotation() * (acc_avr - eskf->GetBiasAcc());
-    for(int i=0; i<3; i++)
-    {
-      acc_s_last[i] += eskf->GetGravity()[i];
-    }
-    double &&offs_t = tail_time - point_begin_timestamp;
+    acc_s_last += eskf->GetGravity();
+
+    LOG_FIRST_N(INFO, 1000) << "imu vel: " << eskf->GetVelocity().transpose();
+    LOG_FIRST_N(INFO, 1000) << "imu pos: " << eskf->GetPosition().transpose();
+
+    const double offs_t = tail_time - point_begin_timestamp;
     Pose6D imu_pose;
     imu_pose.offset_time = offs_t;
     imu_pose.acc = acc_s_last;
@@ -191,7 +243,7 @@ void ImuIntegration::UndistortPoint(
   const double note = point_end_timestamp > imu_end_timestamp ? 1.0 : -1.0;
   dt = note * (point_end_timestamp - imu_end_timestamp);
   eskf->Predict(acc_avr, angvel_avr, dt);
-
+  // LOG_FIRST_N(INFO, 10) << "last dt: " << dt;
 
   auto final_point_pos = eskf->GetPosition();
   auto final_point_rot = eskf->GetRotation();
@@ -208,12 +260,12 @@ void ImuIntegration::UndistortPoint(
     R_imu = head.rot;
     acc_avr = tail.acc;
     angvel_avr = tail.gyr;
-    LOG_FIRST_N(INFO, 100) << "head.offset_time: " << head.offset_time << " it_point->time: " << it_point->time;
-    LOG_FIRST_N(INFO, 100) << "pos_imu: " << head.pos.transpose();
-    LOG_FIRST_N(INFO, 100) << "vel_imu: " << head.vel.transpose();
-    LOG_FIRST_N(INFO, 100) << "R_imu: " << head.rot.matrix();
-    LOG_FIRST_N(INFO, 100) << "acc_avr: " << acc_avr.transpose();
-    LOG_FIRST_N(INFO, 100) << "angvel_avr: " << angvel_avr.transpose();
+    // LOG_FIRST_N(INFO, 100) << "head.offset_time: " << head.offset_time << " it_point->time: " << it_point->time;
+    // LOG_FIRST_N(INFO, 100) << "pos_imu: " << head.pos.transpose();
+    // LOG_FIRST_N(INFO, 100) << "vel_imu: " << head.vel.transpose();
+    // // LOG_FIRST_N(INFO, 100) << "R_imu: " << head.rot.matrix();
+    // LOG_FIRST_N(INFO, 100) << "acc_avr: " << acc_avr.transpose();
+    // LOG_FIRST_N(INFO, 100) << "angvel_avr: " << angvel_avr.transpose();
 
     for (; it_point->time > head.offset_time; ++it_point) {
       if (it_point == undistorted_point_cloud.points.rend()) break;
@@ -224,7 +276,7 @@ void ImuIntegration::UndistortPoint(
       Eigen::Vector3d t_ei = pos_imu + vel_imu * dt + 0.5 * acc_avr * dt * dt - final_point_pos;
       Eigen::Vector3d pt_i_new = final_point_rot.inverse() * (R_i * pt_i + t_ei);
       it_point->getVector3fMap() = pt_i_new.cast<float>();
-      LOG_FIRST_N(INFO, 100) << "pt_i: " << pt_i.transpose() << " pt_i_new: " << pt_i_new.transpose();
+      LOG_EVERY_N(INFO, 10000) << "pt_i: " << pt_i.transpose() << " pt_i_new: " << pt_i_new.transpose();
     }
   }
 }

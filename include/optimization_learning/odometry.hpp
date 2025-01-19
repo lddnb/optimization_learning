@@ -39,9 +39,9 @@ private:
   void CloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg);
   void ImuCallback(const sensor_msgs::msg::Imu::SharedPtr msg);
   void GroundTruthPathCallback(const nav_msgs::msg::Path::SharedPtr msg);
-  bool GetSyncedData(sensor_msgs::msg::PointCloud2::SharedPtr& cloud_buffer, std::deque<sensor_msgs::msg::Imu::SharedPtr>& imu_buffer);
-  void PublishTF(const std_msgs::msg::Header& header);
-  void PublishOdom(const std_msgs::msg::Header& header);
+  bool GetSyncedData(SyncedData& synced_data);
+  void PublishTF(const builtin_interfaces::msg::Time& timestamp);
+  void PublishOdom(const builtin_interfaces::msg::Time& timestamp);
   void UpdateLocalMap(const pcl::PointCloud<PointType>::Ptr& msg, const Eigen::Isometry3d& pose);
   void SaveMappingResult();
   RegistrationConfig ConfigRegistration();
@@ -86,6 +86,7 @@ private:
 
   std::deque<sensor_msgs::msg::PointCloud2::SharedPtr> lidar_cloud_buffer_;
   std::deque<sensor_msgs::msg::Imu::SharedPtr> imu_buffer_;
+  SyncedData synced_data_;
 
   // calibration
   Eigen::Isometry3d T_imu2lidar_;

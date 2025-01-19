@@ -13,6 +13,7 @@
 
 #include <Eigen/Eigen>
 #include <sensor_msgs/msg/imu.hpp>
+#include <sensor_msgs/msg/point_cloud2.hpp>
 
 #include "optimization_learning/common.hpp"
 #include "optimization_learning/eskf.hpp"
@@ -22,6 +23,13 @@ using PointType = PointXYZIT;
 template <typename PointT>
 const bool time_list(const PointT& x, const PointT& y) {return (x.time < y.time);};
 
+struct SyncedData {
+  pcl::PointCloud<PointType>::Ptr cloud;
+  std::deque<sensor_msgs::msg::Imu::SharedPtr> imu;
+  double lidar_begin_timestamp;
+  double lidar_end_timestamp;
+};
+
 class ImuIntegration
 {
 public:
@@ -29,15 +37,13 @@ public:
   ~ImuIntegration();
 
   bool ProcessImu(
-    const std::deque<sensor_msgs::msg::Imu::SharedPtr>& imu_buffer,
-    const pcl::PointCloud<PointType>::Ptr& input_cloud,
+    const SyncedData& synced_data,
     pcl::PointCloud<PointType>& output_cloud,
     std::unique_ptr<ESKF>& eskf);
   void Init(const std::deque<sensor_msgs::msg::Imu::SharedPtr>& imu_buffer, std::unique_ptr<ESKF>& eskf);
 
   void UndistortPoint(
-    const std::deque<sensor_msgs::msg::Imu::SharedPtr>& imu_buffer,
-    const pcl::PointCloud<PointType>::Ptr& point_cloud,
+    const SyncedData& synced_data,
     pcl::PointCloud<PointType>& undistorted_point_cloud,
     std::unique_ptr<ESKF>& eskf);
   void Integrate(const sensor_msgs::msg::Imu::SharedPtr& msg);
@@ -61,6 +67,7 @@ private:
   // init
   bool is_initialized_;
   int init_imu_size_;
+  std::deque<sensor_msgs::msg::Imu::SharedPtr> init_imu_deque_;
 
   Eigen::Vector3d mean_acc_;
   Eigen::Vector3d mean_gyr_;

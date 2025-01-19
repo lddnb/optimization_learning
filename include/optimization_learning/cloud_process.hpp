@@ -55,8 +55,7 @@ void VelodyneHandler(const sensor_msgs::msg::PointCloud2::SharedPtr &msg, pcl::P
         added_pt.y = pl_orig.points[i].y;
         added_pt.z = pl_orig.points[i].z;
         added_pt.intensity = pl_orig.points[i].intensity;
-        added_pt.time = pl_orig.points[i].time * 0.001;  // curvature unit: ms
-        LOG_FIRST_N(INFO, 10) << "added_pt.time: " << added_pt.time;
+        added_pt.time = pl_orig.points[i].time * 1e-6; // curvature unit: us
 
         /// 略掉过近的点
         if (added_pt.getVector3fMap().norm() < 2.0) {
