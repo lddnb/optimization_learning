@@ -115,41 +115,22 @@ void LidarOdometry::MainThread()
       // 转换到imu坐标系
       pcl::transformPointCloud(*downsampled_cloud, *downsampled_cloud, T_imu2lidar_.matrix());
 
-      static int cnt = 0;
       pcl::PointCloud<PointType>::Ptr undistorted_cloud(new pcl::PointCloud<PointType>(*downsampled_cloud));
       if (!imu_integration_->ProcessImu(synced_data_, *undistorted_cloud, eskf_)) {
         LOG(WARNING) << "IMU initializing " << imu_integration_->GetInitImuSize() << " frames";
         continue;
       }
-      // if (cnt < 10) pcl::io::savePCDFileASCII("/home/lz/win/download/before_undistorted_cloud_" + std::to_string(cnt) + ".pcd", *downsampled_cloud);
-      // if (cnt < 10) pcl::io::savePCDFileASCII("/home/lz/win/download/after_undistorted_cloud_" + std::to_string(cnt) + ".pcd", *undistorted_cloud);
-      cnt++;
-
-      LOG(INFO) << "undistorted_cloud size: " << undistorted_cloud->size();
 
       if (local_map_ == nullptr) {
         local_map_.reset(new pcl::PointCloud<PointType>);
         local_map_ = undistorted_cloud;
-        // pcl::io::savePCDFileASCII("/home/lz/win/download/local_map_0.pcd", *local_map_);
         PublishTF(ros_stamp);
         PublishOdom(ros_stamp);
         continue;
       }
-      LOG(INFO) << "local_map_ size: " << local_map_->size();
-      static bool save_local_map = false;
-      if (!save_local_map) {
-        // pcl::io::savePCDFileASCII("/home/lz/win/download/local_map_1.pcd", *local_map_);
-        save_local_map = true;
-      }
 
-      // LOG_FIRST_N(INFO, 10000) << "pose before: " << current_pose_.translation().transpose();
-      // imu_integration_->UpdatePose(current_pose_);
-      // for (const auto& imu : current_imu_buffer) {
-      //   imu_integration_->Integrate(imu);
-      // }
-      // current_pose_ = imu_integration_->GetCurrentPose();
-      // LOG_FIRST_N(INFO, 10000) << "pose after: " << current_pose_.translation().transpose();
-      // LOG_FIRST_N(INFO, 10000) << "velocity: " << imu_integration_->GetCurrentVelocity().transpose();
+      current_pose_.translation() = eskf_->GetPosition();
+      current_pose_.linear() = eskf_->GetRotation().toRotationMatrix();
 
       registration_time_eval_.tic();
       registration->setInputSource(undistorted_cloud);
@@ -159,10 +140,13 @@ void LidarOdometry::MainThread()
       registration->align(current_pose_, iterations);
       registration_time_eval_.toc();
 
-      // eskf_->Update(current_pose_.translation(), Eigen::Quaterniond(current_pose_.rotation()), 1e-2, 1e-2);
-      //************ 用 eskf 的结果更新 current_pose_ ************//
+      LOG(INFO) << "current_pose_ after registration: " << current_pose_.translation().transpose();
+
+      eskf_->Update(current_pose_.translation(), Eigen::Quaterniond(current_pose_.rotation()), 1e-2, 1e-2);
       current_pose_.translation() = eskf_->GetPosition();
       current_pose_.linear() = eskf_->GetRotation().toRotationMatrix();
+
+      LOG(INFO) << "current_pose_ after eskf: " << current_pose_.translation().transpose();
 
       // 发布pose和tf
       PublishTF(ros_stamp);
@@ -435,16 +419,24 @@ void LidarOdometry::PublishOdom(const builtin_interfaces::msg::Time& timestamp)
   odom_msg.header.frame_id = "map";
   odom_msg.child_frame_id = lidar_frame_;
   odom_msg.pose.pose = pose_msg.pose;
+
+  // 获取ESKF的完整协方差矩阵
   auto P = eskf_->GetCovariance();
-  for (int i = 0; i < 6; i++) {
-    int k = i < 3 ? i : i + 3;
-    odom_msg.pose.covariance[i * 6 + 0] = P(k, 0);
-    odom_msg.pose.covariance[i * 6 + 1] = P(k, 1);
-    odom_msg.pose.covariance[i * 6 + 2] = P(k, 2);
-    odom_msg.pose.covariance[i * 6 + 3] = P(k, 6);
-    odom_msg.pose.covariance[i * 6 + 4] = P(k, 7);
-    odom_msg.pose.covariance[i * 6 + 5] = P(k, 8);
+  // ROS的PoseWithCovariance使用6x6的协方差矩阵，顺序为[x, y, z, rot_x, rot_y, rot_z]
+  // ESKF的协方差矩阵为18x18，顺序为[p, v, theta, bg, ba, g]，每个都是3维
+  for (int i = 0; i < 3; ++i) {
+    for (int j = 0; j < 3; ++j) {
+      // 位置协方差 (p-p)
+      odom_msg.pose.covariance[i * 6 + j] = P(i, j);
+      // 位置-姿态交叉协方差 (p-theta)
+      odom_msg.pose.covariance[i * 6 + (j + 3)] = P(i, j + 6);
+      // 姿态-位置交叉协方差 (theta-p)
+      odom_msg.pose.covariance[(i + 3) * 6 + j] = P(i + 6, j);
+      // 姿态协方差 (theta-theta)
+      odom_msg.pose.covariance[(i + 3) * 6 + (j + 3)] = P(i + 6, j + 6);
+    }
   }
+
   odom_pub_->publish(odom_msg);
 
   // 更新path

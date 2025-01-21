@@ -43,7 +43,7 @@ public:
 private:
   Eigen::Vector3d p_;
   Eigen::Vector3d v_;
-  Eigen::Quaterniond R_; 
+  gtsam::Rot3 R_; 
   Eigen::Vector3d bg_;
   Eigen::Vector3d ba_;
   Eigen::Vector3d g_;
