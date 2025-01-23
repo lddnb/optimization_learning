@@ -11,7 +11,7 @@
 
 #include "optimization_learning/imu_integration.hpp"
 
-ImuIntegration::ImuIntegration()
+ImuIntegration::ImuIntegration(int init_sec)
 {
   current_pose_ = Eigen::Isometry3d::Identity();
   current_velocity_ = Eigen::Vector3d::Zero();
@@ -26,6 +26,7 @@ ImuIntegration::ImuIntegration()
 
   mean_acc_ = Eigen::Vector3d::Zero();
   mean_gyr_ = Eigen::Vector3d::Zero();
+  init_sec_ = init_sec;
 }
 
 ImuIntegration::~ImuIntegration()
@@ -68,7 +69,7 @@ void ImuIntegration::Init(const std::deque<sensor_msgs::msg::Imu::SharedPtr>& im
 
     init_imu_size_++;
   }
-  if (init_imu_size_ >= 300) {
+  if (init_imu_size_ >= init_sec_ * 100) {
     // eskf->SetBiasAcc(mean_acc_);
     eskf->SetBiasGyro(mean_gyr_);
     

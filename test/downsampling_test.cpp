@@ -81,7 +81,7 @@ TEST_F(DownsamplingTest, VoxelGridOMP) {
   pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_small_gicp_pcl(new pcl::PointCloud<pcl::PointXYZI>);
   for (size_t i = 0; i < small_gicp::traits::size(*downsampled_cloud_small_gicp); i++) {
     auto pt = small_gicp::traits::point(*downsampled_cloud_small_gicp, i);
-    cloud_small_gicp_pcl->points.push_back(pcl::PointXYZI(pt[0], pt[1], pt[2], 0));
+    cloud_small_gicp_pcl->points.emplace_back(pcl::PointXYZI(pt[0], pt[1], pt[2], 0));
   }
   LOG(INFO) << "Downsampled cloud size (small_gicp omp): " << cloud_small_gicp_pcl->size();
 

@@ -6,7 +6,6 @@ Panels:
       Expanded:
         - /Global Options1
         - /Status1
-        - /PointCloud21/Topic1
         - /TF1/Frames1
         - /TF1/Tree1
       Splitter Ratio: 0.5
@@ -59,30 +58,30 @@ Visualization Manager:
       Axis: Z
       Channel Name: intensity
       Class: rviz_default_plugins/PointCloud2
-      Color: 255; 255; 255
-      Color Transformer: Intensity
+      Color: 255; 255; 127
+      Color Transformer: FlatColor
       Decay Time: 0
-      Enabled: false
+      Enabled: true
       Invert Rainbow: false
       Max Color: 255; 255; 255
-      Max Intensity: 6281
+      Max Intensity: 0
       Min Color: 0; 0; 0
-      Min Intensity: 2
+      Min Intensity: 0
       Name: PointCloud2
       Position Transformer: XYZ
       Selectable: true
       Size (Pixels): 3
-      Size (m): 0.009999999776482582
+      Size (m): 0.029999999329447746
       Style: Flat Squares
       Topic:
         Depth: 5
         Durability Policy: Volatile
         History Policy: Keep Last
         Reliability Policy: Best Effort
-        Value: /sensing/lidar/top/rectified/pointcloud
+        Value: /output_local_map
       Use Fixed Frame: true
       Use rainbow: true
-      Value: false
+      Value: true
     - Alpha: 1
       Buffer Length: 1
       Class: rviz_default_plugins/Path
@@ -159,7 +158,7 @@ Visualization Manager:
         All Enabled: true
         map:
           Value: true
-        velo_link:
+        velodyne:
           Value: true
       Marker Scale: 1
       Name: TF
@@ -168,7 +167,7 @@ Visualization Manager:
       Show Names: false
       Tree:
         map:
-          velo_link:
+          velodyne:
             {}
       Update Interval: 0
       Value: true
@@ -187,7 +186,7 @@ Visualization Manager:
       Enabled: true
       Invert Rainbow: false
       Max Color: 255; 255; 255
-      Max Intensity: 0.9599999785423279
+      Max Intensity: 0
       Min Color: 0; 0; 0
       Min Intensity: 0
       Name: PointCloud2
@@ -279,25 +278,25 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 38.74925994873047
+      Distance: 37.91378402709961
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
       Focal Point:
-        X: 14.580825805664062
-        Y: -3.1467387676239014
-        Z: -2.9740779399871826
+        X: 8.03359603881836
+        Y: -4.785589218139648
+        Z: -1.9958938360214233
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 0.4503982961177826
+      Pitch: 0.630398690700531
       Target Frame: <Fixed Frame>
       Value: Orbit (rviz)
-      Yaw: 2.9604008197784424
+      Yaw: 2.4103963375091553
     Saved: ~
 Window Geometry:
   Displays:
@@ -315,5 +314,5 @@ Window Geometry:
   Views:
     collapsed: true
   Width: 1200
-  X: 414
-  Y: 284
+  X: 111
+  Y: 158

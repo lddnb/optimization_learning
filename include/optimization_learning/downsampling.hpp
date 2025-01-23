@@ -256,13 +256,13 @@ voxelgrid_sampling_pstl(const typename pcl::PointCloud<PointT>::Ptr& points, dou
 
   // 找到所有不同的体素坐标
   std::vector<size_t> voxel_starts;  // 存储每个体素的起始索引
-  voxel_starts.push_back(0);
+  voxel_starts.emplace_back(0);
   for (size_t i = 1; i < coord_pt.size(); ++i) {
     if (coord_pt[i].first != coord_pt[i-1].first) {
-      voxel_starts.push_back(i);
+      voxel_starts.emplace_back(i);
     }
   }
-  voxel_starts.push_back(coord_pt.size());  // 添加结束索引
+  voxel_starts.emplace_back(coord_pt.size());  // 添加结束索引
 
   // 为每个体素创建一个结果，使用正确的分配器
   std::vector<PointT, Eigen::aligned_allocator<PointT>> temp_points(voxel_starts.size() - 1);

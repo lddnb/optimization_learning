@@ -170,7 +170,7 @@ public:
     }
     auto end_time = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time_);
-    time_records_.push_back(duration.count() / 1000.0);  // 转换为毫秒
+    time_records_.emplace_back(duration.count() / 1000.0);  // 转换为毫秒
     is_timing_ = false;
   }
 

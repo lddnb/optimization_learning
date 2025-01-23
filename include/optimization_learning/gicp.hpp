@@ -846,7 +846,7 @@ public:
         break;
       }
       case RegistrationConfig::Koide: {
-        VGICP_small_gicp<PointT>(this->source_cloud_, this->target_cloud_, result_pose, num_iterations, this->config_);
+        GICP_small_gicp<PointT>(this->source_cloud_, this->target_cloud_, result_pose, num_iterations, this->config_);
         break;
       }
       default: {

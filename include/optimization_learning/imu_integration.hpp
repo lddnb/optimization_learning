@@ -33,7 +33,7 @@ struct SyncedData {
 class ImuIntegration
 {
 public:
-  ImuIntegration();
+  ImuIntegration(int init_sec);
   ~ImuIntegration();
 
   bool ProcessImu(
@@ -67,6 +67,7 @@ private:
   // init
   bool is_initialized_;
   int init_imu_size_;
+  int init_sec_;
   std::deque<sensor_msgs::msg::Imu::SharedPtr> init_imu_deque_;
 
   Eigen::Vector3d mean_acc_;

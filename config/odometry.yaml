@@ -44,12 +44,15 @@ lidar_odometry:
     output_odom_topic: "/output_odom"
     output_path_topic: "/output_path"
     output_cloud_topic: "/output_cloud"
+    output_local_map_topic: "/output_local_map"
+
+    imu_init_sec: 10
 
     # local map
     local_map_min_frame_size: 5
     update_frame_size: 10
     update_translation_delta: 0.5  # meters
-    update_rotation_delta: 15.0  # degrees
+    update_rotation_delta: 30.0  # degrees
 
     # save map
     save_map_path: "/home/ubuntu/ros_ws/src/optimization_learning/map"
