@@ -110,18 +110,9 @@ void LidarOdometry::MainThread()
       builtin_interfaces::msg::Time ros_stamp;
       ros_stamp.sec = static_cast<int>(synced_data_.lidar_begin_timestamp);
       ros_stamp.nanosec = static_cast<int>((synced_data_.lidar_begin_timestamp - static_cast<int>(synced_data_.lidar_begin_timestamp)) * 1e9);
-      // 下采样
-      pcl::PointCloud<PointType>::Ptr downsampled_cloud(new pcl::PointCloud<PointType>);
-      downsample_time_eval_.tic();
-      // voxel_grid_.setInputCloud(cloud);
-      // voxel_grid_.filter(*downsampled_cloud);
-      downsampled_cloud = voxelgrid_sampling_pstl<PointType>(synced_data_.cloud, 0.4);
-      downsample_time_eval_.toc();
 
-      // 转换到imu坐标系
-      pcl::transformPointCloud(*downsampled_cloud, *downsampled_cloud, T_imu2lidar_.matrix());
-
-      pcl::PointCloud<PointType>::Ptr undistorted_cloud(new pcl::PointCloud<PointType>(*downsampled_cloud));
+      // 预测步 + 去畸变
+      pcl::PointCloud<PointType>::Ptr undistorted_cloud(new pcl::PointCloud<PointType>);
       auto pose_before_imu_eskf = current_pose_;
 #if USE_ESKF
       if (!imu_integration_->ProcessImu(synced_data_, *undistorted_cloud, eskf_)) {
@@ -130,9 +121,20 @@ void LidarOdometry::MainThread()
       }
 #endif
 
+      // 下采样
+      pcl::PointCloud<PointType>::Ptr downsampled_cloud(new pcl::PointCloud<PointType>);
+      downsample_time_eval_.tic();
+      // voxel_grid_.setInputCloud(cloud);
+      // voxel_grid_.filter(*downsampled_cloud);
+      downsampled_cloud = voxelgrid_sampling_pstl<PointType>(undistorted_cloud, 0.4);
+      downsample_time_eval_.toc();
+
+      // 转换到imu坐标系
+      pcl::transformPointCloud(*downsampled_cloud, *downsampled_cloud, T_imu2lidar_.matrix());
+
       if (local_map_ == nullptr) {
         local_map_.reset(new pcl::PointCloud<PointType>);
-        local_map_ = undistorted_cloud;
+        local_map_ = downsampled_cloud;
         PublishTF(ros_stamp);
         PublishOdom(ros_stamp);
         continue;
@@ -145,7 +147,7 @@ void LidarOdometry::MainThread()
 
       auto pose_before_reg = current_pose_;
       registration_time_eval_.tic();
-      registration->setInputSource(undistorted_cloud);
+      registration->setInputSource(downsampled_cloud);
       registration->setInputTarget(local_map_);
       registration->setInitialTransformation(current_pose_);
       int iterations = 0;
@@ -179,15 +181,15 @@ void LidarOdometry::MainThread()
         LOG(FATAL) << "Registration Error!";
       }
 
-      pcl::transformPointCloud(*undistorted_cloud, *undistorted_cloud, current_pose_.matrix());
+      pcl::transformPointCloud(*downsampled_cloud, *downsampled_cloud, current_pose_.matrix());
       sensor_msgs::msg::PointCloud2 cloud_msg;
-      pcl::toROSMsg(*undistorted_cloud, cloud_msg);
+      pcl::toROSMsg(*downsampled_cloud, cloud_msg);
       //! 记得设置 frame_id
       cloud_msg.header.frame_id = "map";
       cloud_msg.header.stamp = ros_stamp;
       cloud_pub_->publish(cloud_msg);
 
-      UpdateLocalMap(undistorted_cloud, current_pose_);
+      UpdateLocalMap(downsampled_cloud, current_pose_);
 
       auto end_time = std::chrono::high_resolution_clock::now();
       auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
@@ -377,7 +379,8 @@ void LidarOdometry::GroundTruthPathCallback(const nav_msgs::msg::Path::SharedPtr
 
 void LidarOdometry::UpdateLocalMap(const pcl::PointCloud<PointType>::Ptr& msg, const Eigen::Isometry3d& pose)
 {
-  static std::deque<pcl::PointCloud<PointType>::Ptr> local_map_list;
+  static pcl::PointCloud<PointType>::Ptr local_map_buffer(new pcl::PointCloud<PointType>);
+  static int local_map_buffer_size = 0;
   static Eigen::Isometry3d last_pose = pose;
 
   // 计算相对运动（在last_pose局部坐标系下）
@@ -386,24 +389,21 @@ void LidarOdometry::UpdateLocalMap(const pcl::PointCloud<PointType>::Ptr& msg, c
   const double trans_diff = delta_t.norm();
   const double rot_diff = Eigen::AngleAxisd(delta_R).angle();
 
-  if (local_map_list.empty() || trans_diff > update_translation_delta_ || rot_diff > update_rotation_delta_) {
-    local_map_list.emplace_back(msg);
+  if (local_map_buffer->empty() || trans_diff > update_translation_delta_ || rot_diff > update_rotation_delta_) {
+    *local_map_buffer += *msg;
     *local_map_ += *msg;
     last_pose = pose;
-
-    LOG(INFO) << "Position change: " << trans_diff << "m, " << "Rotation change: " << (rot_diff * 180.0 / M_PI) << "deg";
+    local_map_buffer_size++;
+    // LOG(INFO) << "Position change: " << trans_diff << "m, " << "Rotation change: " << (rot_diff * 180.0 / M_PI) << "deg";
   }
-  LOG(WARNING) << "local_map_list.size(): " << local_map_list.size();
 
-  if (local_map_list.size() >= update_frame_size_) {
-    local_map_.reset(new pcl::PointCloud<PointType>);
-    pcl::PointCloud<PointType>::Ptr cur_local_map(new pcl::PointCloud<PointType>);
-    for (const auto& cloud : local_map_list) {
-      *cur_local_map += *cloud;
-    }
-    local_map_ = voxelgrid_sampling_pstl<PointType>(cur_local_map, 0.1);
-    LOG(INFO) << "Update local map! point size: " << local_map_->size();
-    local_map_list.clear();
+  if (local_map_buffer_size >= update_frame_size_) {
+    local_map_->clear();
+    *local_map_ = *local_map_buffer;
+    // local_map_ = voxelgrid_sampling_pstl<PointType>(local_map_buffer, 0.1);
+    LOG(WARNING) << "Update local map! point size: " << local_map_->size();
+    local_map_buffer->clear();
+    local_map_buffer_size = 0;
 
     sensor_msgs::msg::PointCloud2 cloud_msg;
     pcl::toROSMsg(*local_map_, cloud_msg);
