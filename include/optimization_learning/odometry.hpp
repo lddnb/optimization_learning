@@ -48,6 +48,9 @@ private:
 
   void MainThread();
 
+  template <typename MsgPtr>
+  double GetTimestamp(const MsgPtr& msg);
+
   std::unique_ptr<ImuIntegration> imu_integration_;
   std::unique_ptr<RegistrationBase<PointType>> registration;
   Eigen::Isometry3d current_pose_;
@@ -72,6 +75,8 @@ private:
   int update_frame_size_;
   double update_translation_delta_;
   double update_rotation_delta_;
+  pcl::PointCloud<PointType>::Ptr local_map_buffer_;
+  size_t local_map_buffer_size_;
 
   // save map
   std::string save_map_path_;

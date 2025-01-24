@@ -59,21 +59,23 @@ LidarOdometry::LidarOdometry() : Node("lidar_odometry")
   LOG(INFO) << "[cfg] T_imu2lidar: R:" << T_imu2lidar_.linear() << std::endl << "t:" << T_imu2lidar_.translation().transpose();
 
   cloud_sub_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
-    lidar_topic, qos,
+    lidar_topic,
+    qos,
     std::bind(&LidarOdometry::CloudCallback, this, std::placeholders::_1));
   imu_sub_ = this->create_subscription<sensor_msgs::msg::Imu>(
-    imu_topic, qos,
+    imu_topic,
+    qos,
     std::bind(&LidarOdometry::ImuCallback, this, std::placeholders::_1));
   ground_truth_path_sub_ = this->create_subscription<nav_msgs::msg::Path>(
-    ground_truth_path_topic, qos,
+    ground_truth_path_topic,
+    qos,
     std::bind(&LidarOdometry::GroundTruthPathCallback, this, std::placeholders::_1));
   odom_pub_ = this->create_publisher<nav_msgs::msg::Odometry>(odom_topic, 10);
   path_pub_ = this->create_publisher<nav_msgs::msg::Path>(path_topic, 10);
   cloud_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(cloud_topic, 10);
   local_map_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(local_map_topic, 10);
-  
+
   current_pose_ = Eigen::Isometry3d::Identity();
-  LOG(INFO) << "LidarOdometry Initialized";
 
   // 初始化tf广播器
   tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(this);
@@ -87,8 +89,16 @@ LidarOdometry::LidarOdometry() : Node("lidar_odometry")
   // 初始化时间评估
   downsample_time_eval_ = TimeEval("downsample");
   registration_time_eval_ = TimeEval("registration");
+
+  // local map
+  local_map_buffer_.reset(new pcl::PointCloud<PointType>);
+  local_map_buffer_size_ = 0;
+
+  synced_data_.cloud.reset(new pcl::PointCloud<PointType>);
   
   main_thread_ = std::make_unique<std::thread>(&LidarOdometry::MainThread, this);
+
+  LOG(INFO) << "LidarOdometry Initialized";
 }
 
 LidarOdometry::~LidarOdometry()
@@ -112,8 +122,7 @@ void LidarOdometry::MainThread()
       ros_stamp.nanosec = static_cast<int>((synced_data_.lidar_begin_timestamp - static_cast<int>(synced_data_.lidar_begin_timestamp)) * 1e9);
 
       // 预测步 + 去畸变
-      pcl::PointCloud<PointType>::Ptr undistorted_cloud(new pcl::PointCloud<PointType>);
-      auto pose_before_imu_eskf = current_pose_;
+      pcl::PointCloud<PointType>::Ptr undistorted_cloud(new pcl::PointCloud<PointType>(*synced_data_.cloud));
 #if USE_ESKF
       if (!imu_integration_->ProcessImu(synced_data_, *undistorted_cloud, eskf_)) {
         LOG(WARNING) << "IMU initializing " << imu_integration_->GetInitImuSize() << " frames";
@@ -132,6 +141,7 @@ void LidarOdometry::MainThread()
       // 转换到imu坐标系
       pcl::transformPointCloud(*downsampled_cloud, *downsampled_cloud, T_imu2lidar_.matrix());
 
+      // local map初始化
       if (local_map_ == nullptr) {
         local_map_.reset(new pcl::PointCloud<PointType>);
         local_map_ = downsampled_cloud;
@@ -145,7 +155,7 @@ void LidarOdometry::MainThread()
       current_pose_.linear() = eskf_->GetRotation().toRotationMatrix();
 #endif
 
-      auto pose_before_reg = current_pose_;
+      // 点云配准
       registration_time_eval_.tic();
       registration->setInputSource(downsampled_cloud);
       registration->setInputTarget(local_map_);
@@ -157,6 +167,7 @@ void LidarOdometry::MainThread()
       LOG(INFO) << "current_pose_ after registration: " << current_pose_.translation().transpose();
 
 #if USE_ESKF
+      // eskf 更新步
       eskf_->Update(current_pose_.translation(), Eigen::Quaterniond(current_pose_.rotation()), 1e-2, 1e-2);
       current_pose_.translation() = eskf_->GetPosition();
       current_pose_.linear() = eskf_->GetRotation().toRotationMatrix();
@@ -167,20 +178,7 @@ void LidarOdometry::MainThread()
       PublishTF(ros_stamp);
       PublishOdom(ros_stamp);
 
-      if ((pose_before_reg.translation() - current_pose_.translation()).norm() > 1) {
-        pcl::io::savePCDFileBinary("/home/ubuntu/data/NCLT/error_local_map.pcd", *local_map_);
-        pcl::PointCloud<PointType>::Ptr save_pcd(new pcl::PointCloud<PointType>);
-        pcl::transformPointCloud(*undistorted_cloud, *save_pcd, pose_before_reg.matrix());
-        pcl::io::savePCDFileBinary("/home/ubuntu/data/NCLT/error_pre_scan.pcd", *save_pcd);
-        pcl::transformPointCloud(*undistorted_cloud, *save_pcd, current_pose_.matrix());
-        pcl::io::savePCDFileBinary("/home/ubuntu/data/NCLT/error_reg_scan.pcd", *save_pcd);
-
-        LOG(ERROR) << "t before imu eskf: " << pose_before_imu_eskf.translation().transpose();
-        LOG(ERROR) << "t after imu eskf: " << pose_before_reg.translation().transpose();
-
-        LOG(FATAL) << "Registration Error!";
-      }
-
+      // 发布点云
       pcl::transformPointCloud(*downsampled_cloud, *downsampled_cloud, current_pose_.matrix());
       sensor_msgs::msg::PointCloud2 cloud_msg;
       pcl::toROSMsg(*downsampled_cloud, cloud_msg);
@@ -189,6 +187,7 @@ void LidarOdometry::MainThread()
       cloud_msg.header.stamp = ros_stamp;
       cloud_pub_->publish(cloud_msg);
 
+      // 更新 local map
       UpdateLocalMap(downsampled_cloud, current_pose_);
 
       auto end_time = std::chrono::high_resolution_clock::now();
@@ -205,26 +204,25 @@ bool LidarOdometry::GetSyncedData(SyncedData& synced_data)
   if (lidar_cloud_buffer_.size() < 2 || imu_buffer_.size() < 5) {
     return false;
   }
-
-  synced_data.cloud.reset(new pcl::PointCloud<PointType>);
+  
+  synced_data.cloud->clear();
   synced_data.imu.clear();
-  // LOG(INFO) << "Get synced data, lidar size: " << lidar_cloud_buffer_.size() << ", imu size: " << imu_buffer_.size();
-  synced_data.lidar_begin_timestamp = lidar_cloud_buffer_.front()->header.stamp.sec + lidar_cloud_buffer_.front()->header.stamp.nanosec * 1e-9;
-  synced_data.lidar_end_timestamp = lidar_cloud_buffer_[1]->header.stamp.sec + lidar_cloud_buffer_[1]->header.stamp.nanosec * 1e-9;
-  double imu_begin_time = imu_buffer_.front()->header.stamp.sec + imu_buffer_.front()->header.stamp.nanosec * 1e-9;
-  double imu_end_time = imu_buffer_.back()->header.stamp.sec + imu_buffer_.back()->header.stamp.nanosec * 1e-9;
-
+  const double lidar_begin_time = GetTimestamp(lidar_cloud_buffer_.front());
+  const double lidar_end_time = GetTimestamp(lidar_cloud_buffer_[1]);
+  const double imu_begin_time = GetTimestamp(imu_buffer_.front());
+  const double imu_end_time = GetTimestamp(imu_buffer_.back());
+  
   // 三种情况
   // 1. lidar_frame_begin_time > imu_end_time，清空imu
   // 2. lidar_frame_end_time < imu_begin_time，清空lidar
   // 3. lidar_frame_begin_time <= imu_begin_time && lidar_frame_end_time >= imu_end_time，同步，取点云扫描时间内的imu
 
-  if (synced_data.lidar_begin_timestamp > imu_end_time) {
+  if (lidar_begin_time > imu_end_time) {
     std::lock_guard<std::mutex> lock(imu_buffer_mutex_);
     imu_buffer_.clear();
     return false;
   }
-  if (synced_data.lidar_end_timestamp < imu_begin_time) {
+  if (lidar_end_time < imu_begin_time) {
     std::lock_guard<std::mutex> lock(cloud_buffer_mutex_);
     lidar_cloud_buffer_.pop_front();
     return false;
@@ -240,11 +238,11 @@ bool LidarOdometry::GetSyncedData(SyncedData& synced_data)
   {
     std::lock_guard<std::mutex> lock(imu_buffer_mutex_);
     for (const auto& imu : imu_buffer_) {
-      if (imu->header.stamp.sec + imu->header.stamp.nanosec * 1e-9 > synced_data.lidar_begin_timestamp &&
-          imu->header.stamp.sec + imu->header.stamp.nanosec * 1e-9 < synced_data.lidar_end_timestamp) {
+      if (imu->header.stamp.sec + imu->header.stamp.nanosec * 1e-9 > lidar_begin_time &&
+          imu->header.stamp.sec + imu->header.stamp.nanosec * 1e-9 < lidar_end_time) {
         synced_data.imu.emplace_back(imu);
         imu_buffer_.pop_front();
-      } else if (imu->header.stamp.sec + imu->header.stamp.nanosec * 1e-9 > synced_data.lidar_end_timestamp) {
+      } else if (imu->header.stamp.sec + imu->header.stamp.nanosec * 1e-9 > lidar_end_time) {
         break;
       }
     }
@@ -252,6 +250,9 @@ bool LidarOdometry::GetSyncedData(SyncedData& synced_data)
   if (synced_data.imu.size() < 5) {
     return false;
   }
+
+  synced_data.lidar_begin_timestamp = lidar_begin_time;
+  synced_data.lidar_end_timestamp = lidar_end_time;
 
   return true;
 }
@@ -330,6 +331,12 @@ void LidarOdometry::SaveMappingResult()
   registration_time_eval_.ExportToFile(registration_time_eval_path);
 }
 
+template <typename MsgPtr>
+double LidarOdometry::GetTimestamp(const MsgPtr& msg)
+{
+  return msg->header.stamp.sec + msg->header.stamp.nanosec * 1e-9;
+}
+
 void LidarOdometry::CloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg)
 {
   static int lidar_frame_index = 0;
@@ -379,8 +386,6 @@ void LidarOdometry::GroundTruthPathCallback(const nav_msgs::msg::Path::SharedPtr
 
 void LidarOdometry::UpdateLocalMap(const pcl::PointCloud<PointType>::Ptr& msg, const Eigen::Isometry3d& pose)
 {
-  static pcl::PointCloud<PointType>::Ptr local_map_buffer(new pcl::PointCloud<PointType>);
-  static int local_map_buffer_size = 0;
   static Eigen::Isometry3d last_pose = pose;
 
   // 计算相对运动（在last_pose局部坐标系下）
@@ -389,21 +394,21 @@ void LidarOdometry::UpdateLocalMap(const pcl::PointCloud<PointType>::Ptr& msg, c
   const double trans_diff = delta_t.norm();
   const double rot_diff = Eigen::AngleAxisd(delta_R).angle();
 
-  if (local_map_buffer->empty() || trans_diff > update_translation_delta_ || rot_diff > update_rotation_delta_) {
-    *local_map_buffer += *msg;
+  if (local_map_buffer_->empty() || trans_diff > update_translation_delta_ || rot_diff > update_rotation_delta_) {
+    *local_map_buffer_ += *msg;
     *local_map_ += *msg;
     last_pose = pose;
-    local_map_buffer_size++;
+    local_map_buffer_size_++;
     // LOG(INFO) << "Position change: " << trans_diff << "m, " << "Rotation change: " << (rot_diff * 180.0 / M_PI) << "deg";
   }
 
-  if (local_map_buffer_size >= update_frame_size_) {
+  if (local_map_buffer_size_ >= update_frame_size_) {
     local_map_->clear();
-    *local_map_ = *local_map_buffer;
-    // local_map_ = voxelgrid_sampling_pstl<PointType>(local_map_buffer, 0.1);
+    // *local_map_ = *local_map_buffer_;
+    local_map_ = voxelgrid_sampling_pstl<PointType>(local_map_buffer_, 0.2);
     LOG(WARNING) << "Update local map! point size: " << local_map_->size();
-    local_map_buffer->clear();
-    local_map_buffer_size = 0;
+    local_map_buffer_->clear();
+    local_map_buffer_size_ = 0;
 
     sensor_msgs::msg::PointCloud2 cloud_msg;
     pcl::toROSMsg(*local_map_, cloud_msg);
@@ -462,22 +467,14 @@ void LidarOdometry::PublishOdom(const builtin_interfaces::msg::Time& timestamp)
   odom_msg.child_frame_id = lidar_frame_;
   odom_msg.pose.pose = pose_msg.pose;
 
-  // 获取ESKF的完整协方差矩阵
-  auto P = eskf_->GetCovariance();
-  // ROS的PoseWithCovariance使用6x6的协方差矩阵，顺序为[x, y, z, rot_x, rot_y, rot_z]
-  // ESKF的协方差矩阵为18x18，顺序为[p, v, theta, bg, ba, g]，每个都是3维
-  for (int i = 0; i < 3; ++i) {
-    for (int j = 0; j < 3; ++j) {
-      // 位置协方差 (p-p)
-      odom_msg.pose.covariance[i * 6 + j] = P(i, j);
-      // 位置-姿态交叉协方差 (p-theta)
-      odom_msg.pose.covariance[i * 6 + (j + 3)] = P(i, j + 6);
-      // 姿态-位置交叉协方差 (theta-p)
-      odom_msg.pose.covariance[(i + 3) * 6 + j] = P(i + 6, j);
-      // 姿态协方差 (theta-theta)
-      odom_msg.pose.covariance[(i + 3) * 6 + (j + 3)] = P(i + 6, j + 6);
-    }
-  }
+  const auto& P = eskf_->GetCovariance();
+  
+  // 使用 Eigen 的块操作
+  Eigen::Map<Eigen::Matrix<double, 6, 6, Eigen::RowMajor>> covar(odom_msg.pose.covariance.data());
+  covar.block<3,3>(0,0) = P.block<3,3>(0,0);    // 位置协方差
+  covar.block<3,3>(0,3) = P.block<3,3>(0,6);    // 位置-姿态协方差
+  covar.block<3,3>(3,0) = P.block<3,3>(6,0);    // 姿态-位置协方差
+  covar.block<3,3>(3,3) = P.block<3,3>(6,6);    // 姿态协方差
 
   odom_pub_->publish(odom_msg);
 
