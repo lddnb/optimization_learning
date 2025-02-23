@@ -145,6 +145,8 @@ void LidarOdometry::MainThread()
       if (local_map_ == nullptr) {
         local_map_.reset(new pcl::PointCloud<PointType>);
         local_map_ = downsampled_cloud;
+        ikdtree_.set_downsample_param(0.5);
+        ikdtree_.Build(downsampled_cloud->points);
         PublishTF(ros_stamp);
         PublishOdom(ros_stamp);
         continue;

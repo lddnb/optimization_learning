@@ -28,6 +28,7 @@
 #include "optimization_learning/ndt.hpp"
 #include "optimization_learning/imu_integration.hpp"
 #include "optimization_learning/cloud_process.hpp"
+#include "optimization_learning/ikd_Tree_impl.h"
 
 class LidarOdometry : public rclcpp::Node
 {
@@ -77,6 +78,7 @@ private:
   double update_rotation_delta_;
   pcl::PointCloud<PointType>::Ptr local_map_buffer_;
   size_t local_map_buffer_size_;
+  ikdtreeNS::KD_TREE<PointType> ikdtree_;
 
   // save map
   std::string save_map_path_;
